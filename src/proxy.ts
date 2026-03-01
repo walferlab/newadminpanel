@@ -48,6 +48,15 @@ async function getApprovalStatus(userId: string): Promise<boolean | null> {
 }
 
 export default clerkMiddleware(async (auth, req) => {
+  const pathname = req.nextUrl.pathname
+  const isWebhookPath = pathname.startsWith('/api/webhooks/clerk')
+  const isApprovalSyncPath = pathname.startsWith('/api/admins/sync')
+
+  // Never run approval redirects for webhook/sync endpoints.
+  if (isWebhookPath || isApprovalSyncPath) {
+    return NextResponse.next()
+  }
+
   if (!isPublicRoute(req)) {
     await auth.protect()
   }
@@ -59,7 +68,7 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   const approval = await getApprovalStatus(userId)
-  const isAwaitingApprovalPath = req.nextUrl.pathname.startsWith('/awaiting-approval')
+  const isAwaitingApprovalPath = pathname.startsWith('/awaiting-approval')
 
   if (approval !== true && !isAwaitingApprovalPath) {
     return NextResponse.redirect(new URL('/awaiting-approval', req.url))
