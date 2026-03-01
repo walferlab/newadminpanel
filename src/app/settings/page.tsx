@@ -21,7 +21,6 @@ interface UserPreferences {
 interface ProfileFormState {
   name: string
   email: string
-  position: string
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -33,7 +32,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
 export default function SettingsPage() {
   const { user } = useUser()
 
-  const [profileId, setProfileId] = useState<number | null>(null)
+  const [profileId, setProfileId] = useState<string | null>(null)
   const [profileLoading, setProfileLoading] = useState(true)
   const [savingProfile, setSavingProfile] = useState(false)
   const [savingPreferences, setSavingPreferences] = useState(false)
@@ -42,7 +41,6 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<ProfileFormState>({
     name: '',
     email: '',
-    position: 'Admin',
   })
 
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES)
@@ -57,7 +55,6 @@ export default function SettingsPage() {
         setProfile((prev) => ({
           name: parsed.name ?? prev.name,
           email: parsed.email ?? prev.email,
-          position: parsed.position ?? prev.position,
         }))
       } catch {}
     }
@@ -87,9 +84,10 @@ export default function SettingsPage() {
   useEffect(() => {
     async function loadProfile() {
       const email = user?.primaryEmailAddress?.emailAddress ?? ''
+      const clerkId = user?.id ?? ''
       const defaultName = user?.fullName || user?.firstName || ''
 
-      if (!email) {
+      if (!email && !clerkId) {
         setProfileLoading(false)
         return
       }
@@ -100,11 +98,14 @@ export default function SettingsPage() {
         name: prev.name || defaultName,
       }))
 
-      const { data, error } = await supabase
-        .from('admins')
-        .select('id, name, email, position')
-        .eq('email', email)
-        .maybeSingle()
+      let query = supabase.from('admins').select('id, name, email, clerk_id')
+      if (clerkId) {
+        query = query.eq('clerk_id', clerkId)
+      } else {
+        query = query.eq('email', email)
+      }
+
+      const { data, error } = await query.maybeSingle()
 
       if (error && error.code !== 'PGRST116') {
         toast.error('Could not load profile from database')
@@ -113,11 +114,10 @@ export default function SettingsPage() {
       }
 
       if (data) {
-        setProfileId(Number(data.id))
+        setProfileId(String(data.id))
         setProfile({
           name: data.name ?? defaultName,
           email: data.email ?? email,
-          position: data.position ?? 'Admin',
         })
       }
 
@@ -130,7 +130,7 @@ export default function SettingsPage() {
   async function saveProfile() {
     const name = profile.name.trim()
     const email = profile.email.trim().toLowerCase()
-    const position = profile.position.trim() || 'Admin'
+    const clerkId = user?.id ?? ''
 
     if (!name || !email) {
       toast.error('Name and email are required')
@@ -138,12 +138,12 @@ export default function SettingsPage() {
     }
 
     setSavingProfile(true)
-    localStorage.setItem(PROFILE_DRAFT_KEY, JSON.stringify({ name, email, position }))
+    localStorage.setItem(PROFILE_DRAFT_KEY, JSON.stringify({ name, email }))
 
     if (profileId) {
       const { error } = await supabase
         .from('admins')
-        .update({ name, email, position })
+        .update({ name, email })
         .eq('id', profileId)
 
       if (error) {
@@ -155,9 +155,24 @@ export default function SettingsPage() {
       return
     }
 
+    if (!clerkId) {
+      toast.error('Missing Clerk user id for profile creation')
+      setSavingProfile(false)
+      return
+    }
+
     const { data, error } = await supabase
       .from('admins')
-      .upsert({ name, email, position }, { onConflict: 'email' })
+      .upsert(
+        {
+          clerk_id: clerkId,
+          name,
+          email,
+          approved: false,
+          role: 'uploader',
+        },
+        { onConflict: 'clerk_id' },
+      )
       .select('id')
       .maybeSingle()
 
@@ -168,7 +183,7 @@ export default function SettingsPage() {
     }
 
     if (data?.id) {
-      setProfileId(Number(data.id))
+      setProfileId(String(data.id))
     }
 
     toast.success('Profile saved')
@@ -201,7 +216,7 @@ export default function SettingsPage() {
             Update your admin information stored in Supabase.
           </p>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs uppercase tracking-[0.08em] text-text-muted">
                 Name
@@ -224,19 +239,6 @@ export default function SettingsPage() {
                 value={profile.email}
                 onChange={(event) =>
                   setProfile((prev) => ({ ...prev, email: event.target.value }))
-                }
-                disabled={profileLoading}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs uppercase tracking-[0.08em] text-text-muted">
-                Position
-              </label>
-              <input
-                className="admin-input"
-                value={profile.position}
-                onChange={(event) =>
-                  setProfile((prev) => ({ ...prev, position: event.target.value }))
                 }
                 disabled={profileLoading}
               />

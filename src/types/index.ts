@@ -6,14 +6,13 @@
   | 'uploader'
 
 export interface Admin {
-  id: number
+  id: string
   created_at: string
-  name: string
+  name: string | null
   email: string
-  position: string
-  role?: AdminRole
-  approved?: boolean
-  clerk_id?: string
+  role: AdminRole | null
+  approved: boolean | null
+  clerk_id: string
 }
 
 export interface PDF {

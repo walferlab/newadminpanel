@@ -87,20 +87,11 @@ export async function POST(req: Request) {
       clerk_id: id,
       email,
       name,
-      position: 'Pending Approval',
       approved: false,
       role: 'uploader',
     }
 
-    let { error } = await supabase
-      .from('admins')
-      .upsert(payload, { onConflict: 'clerk_id' })
-
-    // Fallback for older schemas where clerk_id is not unique yet but email is unique.
-    if (error) {
-      const fallback = await supabase.from('admins').upsert(payload, { onConflict: 'email' })
-      error = fallback.error
-    }
+    const { error } = await supabase.from('admins').upsert(payload, { onConflict: 'clerk_id' })
 
     if (error) {
       console.error('Supabase upsert error for Clerk webhook:', error)

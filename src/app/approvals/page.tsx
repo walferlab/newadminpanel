@@ -36,7 +36,12 @@ export default function ApprovalsPage() {
       toast.error('Failed to load users')
       setUsers([])
     } else {
-      setUsers((data ?? []) as PendingUser[])
+      const normalized = ((data ?? []) as Admin[]).map((user) => ({
+        ...user,
+        approved: Boolean(user.approved),
+        role: (user.role ?? 'uploader') as AdminRole,
+      }))
+      setUsers(normalized)
     }
 
     setLoading(false)
@@ -46,7 +51,7 @@ export default function ApprovalsPage() {
     fetchUsers()
   }, [])
 
-  async function handleApprove(id: number) {
+  async function handleApprove(id: string) {
     const { error } = await supabase.from('admins').update({ approved: true }).eq('id', id)
 
     if (error) {
@@ -58,7 +63,7 @@ export default function ApprovalsPage() {
     fetchUsers()
   }
 
-  async function handleReject(id: number) {
+  async function handleReject(id: string) {
     const { error } = await supabase.from('admins').update({ approved: false }).eq('id', id)
 
     if (error) {
@@ -70,7 +75,7 @@ export default function ApprovalsPage() {
     fetchUsers()
   }
 
-  async function handleRoleChange(id: number, role: AdminRole) {
+  async function handleRoleChange(id: string, role: AdminRole) {
     const { error } = await supabase.from('admins').update({ role }).eq('id', id)
 
     if (error) {
@@ -183,7 +188,8 @@ export default function ApprovalsPage() {
                       </div>
                       <p className="text-xs text-text-muted">{user.email}</p>
                       <p className="mt-0.5 text-xs text-text-muted">
-                        Joined {formatDate(user.created_at, 'relative')} | {user.position}
+                        Joined {formatDate(user.created_at, 'relative')} | Role:{' '}
+                        {getRoleLabel(user.role ?? 'uploader')}
                       </p>
                     </div>
 
