@@ -24,6 +24,7 @@ function isPublicRoute(pathname: string): boolean {
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname()
   const [compactSidebar, setCompactSidebar] = useState(false)
+  const isChatRoute = pathname.startsWith('/chat')
 
   useEffect(() => {
     const saved = localStorage.getItem(SIDEBAR_PREF_KEY)
@@ -55,7 +56,13 @@ export function AppShell({ children }: AppShellProps) {
       <Sidebar compact={compactSidebar} onToggleCompact={handleToggleCompactSidebar} />
       <div className={compactSidebar ? 'md:ml-[76px]' : 'md:ml-[220px]'}>
         <TopNavbar compactSidebar={compactSidebar} />
-        <main className="min-h-[calc(100vh-4rem)] px-3 pb-20 pt-[4.75rem] md:px-6 md:pb-6">
+        <main
+          className={
+            isChatRoute
+              ? 'h-[calc(100vh-4rem)] overflow-hidden px-3 pb-20 pt-[4.75rem] md:px-6 md:pb-6'
+              : 'min-h-[calc(100vh-4rem)] px-3 pb-20 pt-[4.75rem] md:px-6 md:pb-6'
+          }
+        >
           {children}
         </main>
       </div>

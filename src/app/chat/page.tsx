@@ -34,10 +34,25 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(true)
   const [firebaseError, setFirebaseError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const messageListRef = useRef<HTMLDivElement>(null)
+  const hasInitialScrollRef = useRef(false)
+
+  function isNearBottom() {
+    const el = messageListRef.current
+    if (!el) {
+      return true
+    }
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  }
+
+  function scrollToBottom(behavior: ScrollBehavior = 'auto') {
+    bottomRef.current?.scrollIntoView({ behavior, block: 'end' })
+  }
 
   useEffect(() => {
     setLoading(true)
     setFirebaseError(null)
+    hasInitialScrollRef.current = false
 
     let active = true
     let unsubscribe = () => {}
@@ -83,6 +98,7 @@ export default function ChatPage() {
             return
           }
 
+          const shouldStickToBottom = !hasInitialScrollRef.current || isNearBottom()
           const rows = snapshot.docs.map((doc) => {
             const data = doc.data() as Omit<ChatMessage, 'id'>
             return {
@@ -95,7 +111,10 @@ export default function ChatPage() {
           setLoading(false)
 
           requestAnimationFrame(() => {
-            bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+            if (shouldStickToBottom) {
+              scrollToBottom(hasInitialScrollRef.current ? 'smooth' : 'auto')
+            }
+            hasInitialScrollRef.current = true
           })
         },
         (error) => {
@@ -165,13 +184,16 @@ export default function ChatPage() {
 
       setInput('')
       setReplyTo(null)
+      requestAnimationFrame(() => {
+        scrollToBottom('smooth')
+      })
     } catch (error) {
       toast.error(getFirebaseErrorMessage(error))
     }
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in flex h-full min-h-0 flex-col overflow-hidden">
       <Header title="Chat" subtitle="Real-time team communication" />
 
       {firebaseError ? (
@@ -180,7 +202,7 @@ export default function ChatPage() {
         </div>
       ) : null}
 
-      <div className="grid min-h-[72vh] grid-cols-1 md:grid-cols-[220px_1fr]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[220px_1fr]">
         <aside className="border-b border-border-subtle pb-3 md:border-b-0 md:border-r md:pr-3">
           <p className="mb-2 text-xs uppercase tracking-wider text-text-muted">Channels</p>
           <div className="space-y-1">
@@ -203,8 +225,8 @@ export default function ChatPage() {
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col md:pl-4">
-          <div className="flex-1 space-y-1 overflow-y-auto py-2">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:pl-4">
+          <div ref={messageListRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto py-2 pr-1">
             {loading ? (
               <p className="py-8 text-center text-sm text-text-muted">Loading messages...</p>
             ) : messages.length === 0 ? (
