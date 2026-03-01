@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react'
 import { Circle, TrendingUp, Upload, Users } from 'lucide-react'
 import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
+import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
 import { StatCard } from '@/components/ui/StatCard'
 import { ActivityHeatmap } from '@/components/ui/ActivityHeatmap'
-import { db } from '@/lib/firebase'
+import { db, ensureFirebaseClientAuth, getFirebaseErrorMessage } from '@/lib/firebase'
 import { supabase } from '@/lib/supabase'
 import {
   cn,
@@ -30,6 +31,7 @@ export default function WorkersPage() {
   const [workers, setWorkers] = useState<WorkerStats[]>([])
   const [recentLogs, setRecentLogs] = useState<ChangeLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [firebaseError, setFirebaseError] = useState<string | null>(null)
   const [selected, setSelected] = useState<WorkerStats | null>(null)
 
   useEffect(() => {
@@ -55,32 +57,65 @@ export default function WorkersPage() {
       setLoading(false)
     }
 
-    fetchWorkers()
+    void fetchWorkers()
 
-    const logsQuery = query(
-      collection(db, 'change_logs'),
-      orderBy('timestamp', 'desc'),
-      limit(20),
-    )
+    let active = true
+    let unsubscribe = () => {}
 
-    const unsubscribe = onSnapshot(
-      logsQuery,
-      (snapshot) => {
-        const logs = snapshot.docs.map((doc) => {
-          const data = doc.data() as Omit<ChangeLog, 'id'>
-          return {
-            id: doc.id,
-            ...data,
-          }
-        })
-        setRecentLogs(logs)
-      },
-      () => {
+    async function subscribeLogs() {
+      try {
+        await ensureFirebaseClientAuth()
+      } catch (error) {
+        if (!active) {
+          return
+        }
+        const message = getFirebaseErrorMessage(error)
+        setFirebaseError(message)
         setRecentLogs([])
-      },
-    )
+        toast.error(message)
+        return
+      }
 
-    return () => unsubscribe()
+      const logsQuery = query(
+        collection(db, 'change_logs'),
+        orderBy('timestamp', 'desc'),
+        limit(20),
+      )
+
+      unsubscribe = onSnapshot(
+        logsQuery,
+        (snapshot) => {
+          if (!active) {
+            return
+          }
+          setFirebaseError(null)
+          const logs = snapshot.docs.map((doc) => {
+            const data = doc.data() as Omit<ChangeLog, 'id'>
+            return {
+              id: doc.id,
+              ...data,
+            }
+          })
+          setRecentLogs(logs)
+        },
+        (error) => {
+          if (!active) {
+            return
+          }
+          const message = getFirebaseErrorMessage(error)
+          setFirebaseError(message)
+          setRecentLogs([])
+          toast.error(message)
+        },
+      )
+    }
+
+    void subscribeLogs()
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
   }, [])
 
   const totalOnline = workers.filter((worker) => worker.isOnline).length
@@ -96,6 +131,12 @@ export default function WorkersPage() {
   return (
     <div className="animate-fade-in">
       <Header title="Workers" subtitle="Monitor worker activity and performance" />
+
+      {firebaseError ? (
+        <div className="mb-3 border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">
+          {firebaseError}
+        </div>
+      ) : null}
 
       <div className="space-y-6 p-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
