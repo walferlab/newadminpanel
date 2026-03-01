@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useUser } from '@clerk/nextjs'
 import {
   addDoc,
   collection,
@@ -10,8 +11,9 @@ import {
   serverTimestamp,
 } from 'firebase/firestore'
 import { AtSign, Hash, Reply, Send } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
-import { db } from '@/lib/firebase'
+import { db, ensureFirebaseClientAuth, getFirebaseErrorMessage } from '@/lib/firebase'
 import { cn, formatDate, getRoleBadgeColor, getRoleLabel } from '@/lib/utils'
 import type { AdminRole, ChatMessage } from '@/types'
 
@@ -24,45 +26,40 @@ const DEMO_USER = {
 }
 
 export default function ChatPage() {
+  const { user } = useUser()
   const [channel, setChannel] = useState('general')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [loading, setLoading] = useState(true)
+  const [firebaseError, setFirebaseError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setLoading(true)
+    setFirebaseError(null)
 
-    const messagesQuery = query(collection(db, 'chat', channel, 'messages'), orderBy('timestamp', 'asc'))
+    let active = true
+    let unsubscribe = () => {}
 
-    const unsubscribe = onSnapshot(
-      messagesQuery,
-      (snapshot) => {
-        const rows = snapshot.docs.map((doc) => {
-          const data = doc.data() as Omit<ChatMessage, 'id'>
-          return {
-            id: doc.id,
-            ...data,
-          }
-        })
+    async function setupChannelListener() {
+      try {
+        await ensureFirebaseClientAuth()
+      } catch (error) {
+        if (!active) {
+          return
+        }
 
-        setMessages(rows)
-        setLoading(false)
-
-        requestAnimationFrame(() => {
-          bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-        })
-      },
-      () => {
+        const message = getFirebaseErrorMessage(error)
+        setFirebaseError(message)
         setMessages([
           {
-            id: 'offline-message',
+            id: 'auth-error-message',
             channel,
             sender_id: 'system',
             sender_name: 'System',
             sender_role: 'admin',
-            content: 'Connect Firebase to enable real-time chat.',
+            content: message,
             mentions: [],
             parent_id: null,
             read_by: [],
@@ -70,10 +67,70 @@ export default function ChatPage() {
           },
         ])
         setLoading(false)
-      },
-    )
+        toast.error(message)
+        return
+      }
 
-    return () => unsubscribe()
+      const messagesQuery = query(
+        collection(db, 'chat', channel, 'messages'),
+        orderBy('timestamp', 'asc'),
+      )
+
+      unsubscribe = onSnapshot(
+        messagesQuery,
+        (snapshot) => {
+          if (!active) {
+            return
+          }
+
+          const rows = snapshot.docs.map((doc) => {
+            const data = doc.data() as Omit<ChatMessage, 'id'>
+            return {
+              id: doc.id,
+              ...data,
+            }
+          })
+
+          setMessages(rows)
+          setLoading(false)
+
+          requestAnimationFrame(() => {
+            bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+          })
+        },
+        (error) => {
+          if (!active) {
+            return
+          }
+
+          const message = getFirebaseErrorMessage(error)
+          setFirebaseError(message)
+          setMessages([
+            {
+              id: 'offline-message',
+              channel,
+              sender_id: 'system',
+              sender_name: 'System',
+              sender_role: 'admin',
+              content: message,
+              mentions: [],
+              parent_id: null,
+              read_by: [],
+              timestamp: new Date().toISOString(),
+            },
+          ])
+          setLoading(false)
+          toast.error(message)
+        },
+      )
+    }
+
+    void setupChannelListener()
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
   }, [channel])
 
   async function sendMessage(event: FormEvent) {
@@ -83,29 +140,45 @@ export default function ChatPage() {
       return
     }
 
+    const senderId = user?.id ?? DEMO_USER.id
+    const senderName =
+      user?.fullName ??
+      user?.firstName ??
+      user?.primaryEmailAddress?.emailAddress ??
+      DEMO_USER.name
+    const senderRole = (user?.publicMetadata?.role as AdminRole | undefined) ?? DEMO_USER.role
     const mentions = Array.from(input.matchAll(/@(\w+)/g)).map((match) => match[1])
 
     try {
+      await ensureFirebaseClientAuth()
       await addDoc(collection(db, 'chat', channel, 'messages'), {
         channel,
-        sender_id: DEMO_USER.id,
-        sender_name: DEMO_USER.name,
-        sender_role: DEMO_USER.role,
+        sender_id: senderId,
+        sender_name: senderName,
+        sender_role: senderRole,
         content: input.trim(),
         mentions,
         parent_id: replyTo?.id ?? null,
-        read_by: [DEMO_USER.id],
+        read_by: [senderId],
         timestamp: serverTimestamp(),
       })
-    } catch {}
 
-    setInput('')
-    setReplyTo(null)
+      setInput('')
+      setReplyTo(null)
+    } catch (error) {
+      toast.error(getFirebaseErrorMessage(error))
+    }
   }
 
   return (
     <div className="animate-fade-in">
       <Header title="Chat" subtitle="Real-time team communication" />
+
+      {firebaseError ? (
+        <div className="mb-3 border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-xs text-accent-red">
+          {firebaseError}
+        </div>
+      ) : null}
 
       <div className="grid min-h-[72vh] grid-cols-1 md:grid-cols-[220px_1fr]">
         <aside className="border-b border-border-subtle pb-3 md:border-b-0 md:border-r md:pr-3">

@@ -10,7 +10,6 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
-import { supabase } from '@/lib/supabase'
 import { cn, formatDate, getRoleLabel } from '@/lib/utils'
 import type { Admin, AdminRole } from '@/types'
 
@@ -27,22 +26,21 @@ export default function ApprovalsPage() {
   async function fetchUsers() {
     setLoading(true)
 
-    const { data, error } = await supabase
-      .from('admins')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
+    const response = await fetch('/api/admins', { method: 'GET', cache: 'no-store' })
+    if (!response.ok) {
       toast.error('Failed to load users')
       setUsers([])
-    } else {
-      const normalized = ((data ?? []) as Admin[]).map((user) => ({
+      setLoading(false)
+      return
+    }
+
+    const payload = (await response.json()) as { users?: Admin[] }
+    const normalized = ((payload.users ?? []) as Admin[]).map((user) => ({
         ...user,
         approved: Boolean(user.approved),
         role: (user.role ?? 'uploader') as AdminRole,
-      }))
-      setUsers(normalized)
-    }
+    }))
+    setUsers(normalized)
 
     setLoading(false)
   }
@@ -52,9 +50,13 @@ export default function ApprovalsPage() {
   }, [])
 
   async function handleApprove(id: string) {
-    const { error } = await supabase.from('admins').update({ approved: true }).eq('id', id)
+    const response = await fetch('/api/admins', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, approved: true }),
+    })
 
-    if (error) {
+    if (!response.ok) {
       toast.error('Failed to approve user')
       return
     }
@@ -64,9 +66,13 @@ export default function ApprovalsPage() {
   }
 
   async function handleReject(id: string) {
-    const { error } = await supabase.from('admins').update({ approved: false }).eq('id', id)
+    const response = await fetch('/api/admins', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, approved: false }),
+    })
 
-    if (error) {
+    if (!response.ok) {
       toast.error('Failed to update user')
       return
     }
@@ -76,9 +82,13 @@ export default function ApprovalsPage() {
   }
 
   async function handleRoleChange(id: string, role: AdminRole) {
-    const { error } = await supabase.from('admins').update({ role }).eq('id', id)
+    const response = await fetch('/api/admins', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, role }),
+    })
 
-    if (error) {
+    if (!response.ok) {
       toast.error('Failed to change role')
       return
     }
