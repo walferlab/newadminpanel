@@ -6,6 +6,7 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/awaiting-approval',
+  '/api/webhooks/clerk(.*)',
 ])
 
 async function getApprovalStatus(userId: string): Promise<boolean | null> {
