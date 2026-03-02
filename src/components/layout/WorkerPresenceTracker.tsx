@@ -10,8 +10,9 @@ interface WorkerPresenceTrackerProps {
   role: AdminRole | null
 }
 
-const HEARTBEAT_MS = 60_000
-const MAX_DELTA_MS = 3 * HEARTBEAT_MS
+const HEARTBEAT_MS = 20_000
+const ACTIVE_IDLE_MS = 2 * 60_000
+const MAX_DELTA_MS = 3 * 60_000
 
 function getTodayKey(nowMs = Date.now()): string {
   const now = new Date(nowMs)
@@ -24,11 +25,13 @@ function getTodayKey(nowMs = Date.now()): string {
 export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
   const pathname = usePathname()
   const { user } = useUser()
+  const pathnameRef = useRef(pathname)
 
   const sessionRef = useRef({
     activeDate: getTodayKey(),
     activeMsToday: 0,
-    lastTickMs: Date.now(),
+    lastFlushMs: Date.now(),
+    lastInteractionMs: Date.now(),
   })
 
   const worker = useMemo(
@@ -43,87 +46,133 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
   )
 
   useEffect(() => {
+    pathnameRef.current = pathname
+  }, [pathname])
+
+  useEffect(() => {
     if (!worker || typeof window === 'undefined') {
       return
     }
 
+    function isVisible() {
+      return document.visibilityState !== 'hidden'
+    }
+
     let stopped = false
+    const interactionOptions: AddEventListenerOptions = { passive: true }
 
-    const flushPresence = async (isOnline: boolean, includeActiveDelta: boolean) => {
-      if (stopped) {
-        return
-      }
-
+    const flushPresence = async () => {
       const nowMs = Date.now()
       const todayKey = getTodayKey(nowMs)
 
       if (sessionRef.current.activeDate !== todayKey) {
         sessionRef.current.activeDate = todayKey
         sessionRef.current.activeMsToday = 0
-        sessionRef.current.lastTickMs = nowMs
+        sessionRef.current.lastFlushMs = nowMs
+        sessionRef.current.lastInteractionMs = nowMs
       }
 
-      if (includeActiveDelta) {
-        const delta = nowMs - sessionRef.current.lastTickMs
-        if (delta > 0 && delta <= MAX_DELTA_MS) {
-          sessionRef.current.activeMsToday += delta
-        }
+      const delta = nowMs - sessionRef.current.lastFlushMs
+      const recentlyActive = nowMs - sessionRef.current.lastInteractionMs <= ACTIVE_IDLE_MS
+      const shouldCountActive = isVisible() && recentlyActive
+
+      if (shouldCountActive && delta > 0 && delta <= MAX_DELTA_MS) {
+        sessionRef.current.activeMsToday += delta
       }
 
-      sessionRef.current.lastTickMs = nowMs
+      sessionRef.current.lastFlushMs = nowMs
 
-      await upsertWorkerPresence({
+      const ok = await upsertWorkerPresence({
         worker,
-        currentPage: pathname,
-        isOnline,
+        currentPage: pathnameRef.current,
+        isOnline: isVisible(),
         activeMsToday: sessionRef.current.activeMsToday,
         activeDate: sessionRef.current.activeDate,
         lastSeenIso: new Date(nowMs).toISOString(),
+        heartbeatMs: nowMs,
       })
+
+      if (!ok && !stopped) {
+        console.warn('Worker presence heartbeat failed')
+      }
+    }
+
+    const markInteraction = () => {
+      sessionRef.current.lastInteractionMs = Date.now()
     }
 
     const tick = () => {
-      const isVisible = document.visibilityState === 'visible' && document.hasFocus()
-      void flushPresence(isVisible, isVisible)
+      if (stopped) {
+        return
+      }
+      void flushPresence()
     }
 
+    markInteraction()
     tick()
 
     const timer = window.setInterval(tick, HEARTBEAT_MS)
 
     const handleVisibility = () => {
-      const isVisible = document.visibilityState === 'visible' && document.hasFocus()
-      void flushPresence(isVisible, isVisible)
+      if (isVisible()) {
+        markInteraction()
+      }
+      tick()
     }
 
     const handleFocus = () => {
-      void flushPresence(true, false)
+      markInteraction()
+      tick()
     }
 
     const handleBlur = () => {
-      void flushPresence(false, false)
+      tick()
     }
 
+    const handlePageHide = () => {
+      stopped = true
+      void upsertWorkerPresence({
+        worker,
+        currentPage: pathnameRef.current,
+        isOnline: false,
+        activeMsToday: sessionRef.current.activeMsToday,
+        activeDate: sessionRef.current.activeDate,
+        lastSeenIso: new Date().toISOString(),
+        heartbeatMs: Date.now(),
+      })
+    }
+
+    window.addEventListener('mousemove', markInteraction, interactionOptions)
+    window.addEventListener('keydown', markInteraction)
+    window.addEventListener('scroll', markInteraction, interactionOptions)
+    window.addEventListener('touchstart', markInteraction, interactionOptions)
     window.addEventListener('focus', handleFocus)
     window.addEventListener('blur', handleBlur)
+    window.addEventListener('pagehide', handlePageHide)
     document.addEventListener('visibilitychange', handleVisibility)
 
     return () => {
       stopped = true
       window.clearInterval(timer)
+      window.removeEventListener('mousemove', markInteraction)
+      window.removeEventListener('keydown', markInteraction)
+      window.removeEventListener('scroll', markInteraction)
+      window.removeEventListener('touchstart', markInteraction)
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('blur', handleBlur)
+      window.removeEventListener('pagehide', handlePageHide)
       document.removeEventListener('visibilitychange', handleVisibility)
       void upsertWorkerPresence({
         worker,
-        currentPage: pathname,
+        currentPage: pathnameRef.current,
         isOnline: false,
         activeMsToday: sessionRef.current.activeMsToday,
         activeDate: sessionRef.current.activeDate,
         lastSeenIso: new Date().toISOString(),
+        heartbeatMs: Date.now(),
       })
     }
-  }, [pathname, worker])
+  }, [worker])
 
   return null
 }

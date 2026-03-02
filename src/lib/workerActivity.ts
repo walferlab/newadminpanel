@@ -32,6 +32,7 @@ interface WorkerPresenceInput {
   activeMsToday: number
   activeDate: string
   lastSeenIso?: string
+  heartbeatMs?: number
 }
 
 function normalizeEmail(value: string | null | undefined): string {
@@ -97,8 +98,10 @@ export async function upsertWorkerPresence({
   activeMsToday,
   activeDate,
   lastSeenIso,
+  heartbeatMs,
 }: WorkerPresenceInput): Promise<boolean> {
   try {
+    const nowMs = heartbeatMs ?? Date.now()
     await ensureFirebaseClientAuth()
     await setDoc(
       doc(db, 'worker_presence', worker.id),
@@ -111,7 +114,9 @@ export async function upsertWorkerPresence({
         is_online: isOnline,
         active_ms_today: Math.max(0, Math.round(activeMsToday)),
         active_date: activeDate,
-        last_seen: lastSeenIso ?? new Date().toISOString(),
+        last_seen: lastSeenIso ?? new Date(nowMs).toISOString(),
+        last_seen_epoch_ms: nowMs,
+        heartbeat_epoch_ms: nowMs,
         updated_at: serverTimestamp(),
       },
       { merge: true },

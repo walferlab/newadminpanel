@@ -42,6 +42,9 @@ interface WorkerPresenceRow {
   worker_role?: string
   is_online?: boolean
   last_seen?: unknown
+  last_seen_epoch_ms?: number
+  heartbeat_epoch_ms?: number
+  updated_at?: unknown
   current_page?: string
   active_ms_today?: number
   active_date?: string
@@ -50,8 +53,9 @@ interface WorkerPresenceRow {
 type StatusFilter = 'all' | 'online' | 'offline'
 type SortBy = 'latest' | 'actions_today' | 'uploads' | 'name'
 
-const ONLINE_THRESHOLD_MS = 10 * 60_000
+const ONLINE_THRESHOLD_MS = 2 * 60_000
 const DAY_MS = 24 * 60 * 60 * 1000
+const WORKER_CLOCK_TICK_MS = 15_000
 
 function normalize(value: string | null | undefined): string | null {
   if (!value) {
@@ -96,6 +100,30 @@ function getTime(value: unknown): number | null {
   return Number.isNaN(timestamp) ? null : timestamp
 }
 
+function getPresenceHeartbeatTime(row: WorkerPresenceRow | undefined): number | null {
+  if (!row) {
+    return null
+  }
+
+  const epochCandidates = [row.heartbeat_epoch_ms, row.last_seen_epoch_ms].filter(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value),
+  )
+
+  if (epochCandidates.length > 0) {
+    return Math.max(...epochCandidates)
+  }
+
+  const parsedCandidates = [getTime(row.last_seen), getTime(row.updated_at)].filter(
+    (value): value is number => typeof value === 'number',
+  )
+
+  if (parsedCandidates.length > 0) {
+    return Math.max(...parsedCandidates)
+  }
+
+  return null
+}
+
 export default function WorkersPage() {
   const [admins, setAdmins] = useState<Admin[]>([])
   const [recentLogs, setRecentLogs] = useState<ChangeLog[]>([])
@@ -109,6 +137,7 @@ export default function WorkersPage() {
   const [sortBy, setSortBy] = useState<SortBy>('latest')
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null)
   const [showSelectedLogsOnly, setShowSelectedLogsOnly] = useState(false)
+  const [clockTick, setClockTick] = useState(() => Date.now())
 
   const loadAdmins = useCallback(async () => {
     setLoadingAdmins(true)
@@ -209,6 +238,16 @@ export default function WorkersPage() {
   }, [])
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      setClockTick(Date.now())
+    }, WORKER_CLOCK_TICK_MS)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
     let active = true
     let unsubscribe = () => {}
 
@@ -260,7 +299,7 @@ export default function WorkersPage() {
   }, [])
 
   const workers = useMemo<WorkerStats[]>(() => {
-    const now = Date.now()
+    const now = clockTick
     const startOfToday = new Date()
     startOfToday.setHours(0, 0, 0, 0)
     const startOfTodayMs = startOfToday.getTime()
@@ -323,8 +362,8 @@ export default function WorkersPage() {
       }
 
       const prev = presenceByAdminId.get(matchedAdminId)
-      const prevTime = getTime(prev?.last_seen) ?? 0
-      const nextTime = getTime(row.last_seen) ?? 0
+      const prevTime = getPresenceHeartbeatTime(prev) ?? 0
+      const nextTime = getPresenceHeartbeatTime(row) ?? 0
       if (!prev || nextTime >= prevTime) {
         presenceByAdminId.set(matchedAdminId, row)
       }
@@ -372,13 +411,11 @@ export default function WorkersPage() {
       const presenceActiveHours = activeMsToday / (60 * 60 * 1000)
 
       const logLastSeenTime = times.length ? Math.max(...times) : null
-      const presenceLastSeenTime = getTime(presence?.last_seen)
+      const presenceLastSeenTime = getPresenceHeartbeatTime(presence)
       const lastSeenTime = Math.max(logLastSeenTime ?? 0, presenceLastSeenTime ?? 0) || null
 
       const presenceOnline =
-        Boolean(presence?.is_online) &&
-        typeof presenceLastSeenTime === 'number' &&
-        now - presenceLastSeenTime <= ONLINE_THRESHOLD_MS
+        typeof presenceLastSeenTime === 'number' && now - presenceLastSeenTime <= ONLINE_THRESHOLD_MS
       const logOnline =
         typeof logLastSeenTime === 'number' && now - logLastSeenTime <= ONLINE_THRESHOLD_MS
 
@@ -399,7 +436,7 @@ export default function WorkersPage() {
         recentLogs: logs.slice(0, 30),
       }
     })
-  }, [admins, presenceRows, recentLogs])
+  }, [admins, clockTick, presenceRows, recentLogs])
 
   const filteredWorkers = useMemo(() => {
     const normalizedQuery = queryText.trim().toLowerCase()
