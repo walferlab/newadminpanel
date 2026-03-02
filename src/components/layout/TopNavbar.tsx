@@ -9,7 +9,8 @@ import { Bell, CheckCheck, LogOut, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getNavLabel } from '@/config/navigation'
 import { supabase } from '@/lib/supabase'
-import { cn, formatDate } from '@/lib/utils'
+import { cn, formatDate, getRoleLabel } from '@/lib/utils'
+import type { AdminRole } from '@/types'
 
 interface NotificationItem {
   id: string
@@ -22,9 +23,10 @@ interface NotificationItem {
 
 interface TopNavbarProps {
   compactSidebar?: boolean
+  role: AdminRole | null
 }
 
-export function TopNavbar({ compactSidebar = false }: TopNavbarProps) {
+export function TopNavbar({ compactSidebar = false, role }: TopNavbarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const { user } = useUser()
@@ -38,6 +40,7 @@ export function TopNavbar({ compactSidebar = false }: TopNavbarProps) {
   const [pendingRequests, setPendingRequests] = useState(0)
   const [items, setItems] = useState<NotificationItem[]>([])
 
+  const roleLabel = getRoleLabel(role ?? 'uploader')
   const totalUnread = unreadMessages + pendingRequests
 
   const refreshCounts = useCallback(async () => {
@@ -107,6 +110,44 @@ export function TopNavbar({ compactSidebar = false }: TopNavbarProps) {
   }, [refreshCounts])
 
   useEffect(() => {
+    const channel = supabase
+      .channel('top-navbar-notifications')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'contact_messages',
+        },
+        () => {
+          void refreshCounts()
+          if (notificationsOpen) {
+            void refreshItems()
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pdf_requests',
+        },
+        () => {
+          void refreshCounts()
+          if (notificationsOpen) {
+            void refreshItems()
+          }
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [notificationsOpen, refreshCounts, refreshItems])
+
+  useEffect(() => {
     if (!notificationsOpen) {
       return
     }
@@ -173,7 +214,9 @@ export function TopNavbar({ compactSidebar = false }: TopNavbarProps) {
         </Link>
 
         <div className="hidden md:block">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-text-muted">Admin</p>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-text-muted">
+            {roleLabel}
+          </p>
           <h1 className="font-display text-lg text-text-primary">{getNavLabel(pathname)}</h1>
         </div>
 

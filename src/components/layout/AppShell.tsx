@@ -5,6 +5,8 @@ import { usePathname } from 'next/navigation'
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { TopNavbar } from '@/components/layout/TopNavbar'
+import { WorkerPresenceTracker } from '@/components/layout/WorkerPresenceTracker'
+import { useAdminRole } from '@/lib/useAdminRole'
 
 interface AppShellProps {
   children: ReactNode
@@ -23,6 +25,7 @@ function isPublicRoute(pathname: string): boolean {
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname()
+  const role = useAdminRole()
   const [compactSidebar, setCompactSidebar] = useState(false)
   const isChatRoute = pathname.startsWith('/chat')
 
@@ -53,20 +56,21 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-bg-primary">
-      <Sidebar compact={compactSidebar} onToggleCompact={handleToggleCompactSidebar} />
+      <Sidebar compact={compactSidebar} onToggleCompact={handleToggleCompactSidebar} role={role} />
       <div className={compactSidebar ? 'md:ml-[76px]' : 'md:ml-[220px]'}>
-        <TopNavbar compactSidebar={compactSidebar} />
+        <TopNavbar compactSidebar={compactSidebar} role={role} />
+        <WorkerPresenceTracker role={role} />
         <main
           className={
             isChatRoute
-              ? 'h-[calc(100vh-4rem)] overflow-hidden px-3 pb-20 pt-[4.75rem] md:px-6 md:pb-6'
+              ? 'mt-16 h-[calc(100dvh-4rem)] overflow-hidden p-0'
               : 'min-h-[calc(100vh-4rem)] px-3 pb-20 pt-[4.75rem] md:px-6 md:pb-6'
           }
         >
           {children}
         </main>
       </div>
-      <MobileBottomNav />
+      {!isChatRoute ? <MobileBottomNav role={role} /> : null}
     </div>
   )
 }

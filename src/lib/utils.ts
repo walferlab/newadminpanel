@@ -107,7 +107,7 @@ export function getRoleLabel(role: AdminRole): string {
 }
 
 export function generateActivityHeatmap(
-  events: Array<{ created_at: string }>,
+  events: Array<{ created_at: unknown }>,
 ): ActivityHeatmapCell[] {
   const today = new Date()
   const start = new Date(today)

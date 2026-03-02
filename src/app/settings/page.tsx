@@ -308,7 +308,7 @@ export default function SettingsPage() {
               >
                 <option value="/dashboard">Dashboard</option>
                 <option value="/books">Books</option>
-                <option value="/data-imports">Imports</option>
+                <option value="/data-imports">Inbox</option>
               </select>
             </div>
           </div>

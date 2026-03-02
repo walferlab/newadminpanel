@@ -1,5 +1,7 @@
-﻿import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
+import { canAccessPath } from '@/lib/rbac'
+import { isAdminRole, type AdminRole } from '@/types'
 
 const isPublicRoute = createRouteMatcher([
   '/login(.*)',
@@ -10,18 +12,36 @@ const isPublicRoute = createRouteMatcher([
   '/api/admins/sync(.*)',
 ])
 
-async function getApprovalStatus(userId: string): Promise<boolean | null> {
+interface AccessContext {
+  approved: boolean | null
+  role: AdminRole | null
+}
+
+function getRolePriority(role: AdminRole): number {
+  const priorities: Record<AdminRole, number> = {
+    super_admin: 5,
+    admin: 4,
+    senior_editor: 3,
+    junior_editor: 2,
+    uploader: 1,
+  }
+
+  return priorities[role]
+}
+
+async function getAccessContext(userId: string): Promise<AccessContext> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
   if (!url || !serviceKey) {
-    return null
+    return { approved: null, role: null }
   }
 
   const endpoint = new URL(`${url}/rest/v1/admins`)
-  endpoint.searchParams.set('select', 'approved')
+  endpoint.searchParams.set('select', 'approved,role,created_at')
   endpoint.searchParams.set('clerk_id', `eq.${userId}`)
-  endpoint.searchParams.set('limit', '1')
+  endpoint.searchParams.set('order', 'created_at.desc')
+  endpoint.searchParams.set('limit', '50')
 
   try {
     const response = await fetch(endpoint.toString(), {
@@ -33,17 +53,33 @@ async function getApprovalStatus(userId: string): Promise<boolean | null> {
     })
 
     if (!response.ok) {
-      return null
+      return { approved: null, role: null }
     }
 
-    const rows = (await response.json()) as Array<{ approved?: boolean }>
+    const rows = (await response.json()) as Array<{ approved?: boolean; role?: string | null }>
     if (!rows.length) {
-      return false
+      return { approved: false, role: null }
     }
 
-    return Boolean(rows[0]?.approved)
+    const validRoles = rows
+      .map((row) => row.role)
+      .filter((value): value is AdminRole => isAdminRole(value))
+
+    const role =
+      validRoles.length > 0
+        ? validRoles.reduce((best, current) =>
+            getRolePriority(current) > getRolePriority(best) ? current : best,
+          )
+        : null
+
+    const approved = rows.some((row) => row.approved === true)
+
+    return {
+      approved,
+      role,
+    }
   } catch {
-    return null
+    return { approved: null, role: null }
   }
 }
 
@@ -52,7 +88,6 @@ export default clerkMiddleware(async (auth, req) => {
   const isWebhookPath = pathname.startsWith('/api/webhooks/clerk')
   const isApprovalSyncPath = pathname.startsWith('/api/admins/sync')
 
-  // Never run approval redirects for webhook/sync endpoints.
   if (isWebhookPath || isApprovalSyncPath) {
     return NextResponse.next()
   }
@@ -62,19 +97,23 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   const { userId } = await auth()
-
   if (!userId) {
     return NextResponse.next()
   }
 
-  const approval = await getApprovalStatus(userId)
+  const { approved, role } = await getAccessContext(userId)
   const isAwaitingApprovalPath = pathname.startsWith('/awaiting-approval')
 
-  if (approval !== true && !isAwaitingApprovalPath) {
+  if (approved !== true && !isAwaitingApprovalPath) {
     return NextResponse.redirect(new URL('/awaiting-approval', req.url))
   }
 
-  if (approval === true && isAwaitingApprovalPath) {
+  if (approved === true && isAwaitingApprovalPath) {
+    return NextResponse.redirect(new URL('/dashboard', req.url))
+  }
+
+  const isApiPath = pathname.startsWith('/api')
+  if (!isApiPath && approved === true && !canAccessPath(pathname, role)) {
     return NextResponse.redirect(new URL('/dashboard', req.url))
   }
 
@@ -87,4 +126,3 @@ export const config = {
     '/(api|trpc)(.*)',
   ],
 }
-

@@ -5,6 +5,16 @@
   | 'junior_editor'
   | 'uploader'
 
+export function isAdminRole(value: unknown): value is AdminRole {
+  return (
+    value === 'super_admin' ||
+    value === 'admin' ||
+    value === 'senior_editor' ||
+    value === 'junior_editor' ||
+    value === 'uploader'
+  )
+}
+
 export interface Admin {
   id: string
   created_at: string
@@ -90,11 +100,13 @@ export interface ChangeLog {
   id: string
   worker_id: string
   worker_name: string
+  worker_email?: string | null
+  worker_role?: AdminRole | null
   action: 'upload' | 'edit' | 'delete' | 'approve' | 'reject'
   resource_type: 'pdf' | 'post' | 'tag' | 'user'
   resource_id: string
   resource_title: string
-  timestamp: string
+  timestamp: unknown
   details?: string
 }
 
@@ -140,7 +152,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, Permission> = {
     canManageTags: true,
     canApproveUsers: true,
     canViewAnalytics: true,
-    canViewRevenue: true,
+    canViewRevenue: false,
     canManageWorkers: true,
   },
   admin: {
@@ -151,8 +163,8 @@ export const ROLE_PERMISSIONS: Record<AdminRole, Permission> = {
     canManageTags: true,
     canApproveUsers: true,
     canViewAnalytics: true,
-    canViewRevenue: true,
-    canManageWorkers: false,
+    canViewRevenue: false,
+    canManageWorkers: true,
   },
   senior_editor: {
     canUploadBooks: true,
@@ -162,7 +174,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, Permission> = {
     canManageTags: true,
     canApproveUsers: false,
     canViewAnalytics: true,
-    canViewRevenue: false,
+    canViewRevenue: true,
     canManageWorkers: false,
   },
   junior_editor: {

@@ -1,25 +1,40 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import { useUser } from '@clerk/nextjs'
 import { BookOpen, Download, Edit2, Plus, Search, Star, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
 import { DataTable, type Column } from '@/components/ui/DataTable'
 import { calculateQualityScore } from '@/lib/revenue'
 import { supabase } from '@/lib/supabase'
+import { useAdminRole } from '@/lib/useAdminRole'
 import { cn, formatDate, formatNumber } from '@/lib/utils'
+import { recordWorkerAction, resolveWorkerIdentity } from '@/lib/workerActivity'
 import type { PDF } from '@/types'
 
 function BooksPageContent() {
+  const { user } = useUser()
+  const role = useAdminRole()
   const searchParams = useSearchParams()
   const querySearch = (searchParams.get('q') ?? '').trim()
   const [books, setBooks] = useState<PDF[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState(querySearch)
   const [searchInput, setSearchInput] = useState(querySearch)
+  const worker = useMemo(
+    () =>
+      resolveWorkerIdentity({
+        clerkId: user?.id ?? null,
+        name: user?.fullName ?? user?.firstName ?? null,
+        email: user?.primaryEmailAddress?.emailAddress ?? null,
+        role,
+      }),
+    [role, user],
+  )
 
   const fetchBooks = useCallback(async () => {
     setLoading(true)
@@ -58,16 +73,27 @@ function BooksPageContent() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
-  async function handleDelete(id: number) {
+  async function handleDelete(book: PDF) {
     if (!window.confirm('Delete this book permanently?')) {
       return
     }
 
-    const { error } = await supabase.from('pdfs').delete().eq('id', id)
+    const { error } = await supabase.from('pdfs').delete().eq('id', book.id)
 
     if (error) {
       toast.error('Delete failed')
       return
+    }
+
+    if (worker) {
+      void recordWorkerAction({
+        worker,
+        action: 'delete',
+        resourceType: 'pdf',
+        resourceId: String(book.id),
+        resourceTitle: book.title,
+        details: 'Deleted from books table',
+      })
     }
 
     toast.success('Book deleted')
@@ -83,6 +109,17 @@ function BooksPageContent() {
     if (error) {
       toast.error('Update failed')
       return
+    }
+
+    if (worker) {
+      void recordWorkerAction({
+        worker,
+        action: 'edit',
+        resourceType: 'pdf',
+        resourceId: String(book.id),
+        resourceTitle: book.title,
+        details: `Set featured to ${!book.is_featured}`,
+      })
     }
 
     void fetchBooks()
@@ -198,7 +235,7 @@ function BooksPageContent() {
             <Edit2 size={13} />
           </Link>
           <button
-            onClick={() => void handleDelete(book.id)}
+            onClick={() => void handleDelete(book)}
             className="inline-flex h-8 w-8 items-center justify-center border border-border-subtle text-text-muted transition-colors hover:border-accent-red/50 hover:text-accent-red"
             type="button"
             aria-label="Delete"

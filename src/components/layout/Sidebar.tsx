@@ -4,16 +4,19 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { usePathname } from 'next/navigation'
-import { NAV_ITEMS } from '@/config/navigation'
+import { getNavItemsForRole } from '@/config/navigation'
 import { cn } from '@/lib/utils'
+import type { AdminRole } from '@/types'
 
 interface SidebarProps {
   compact: boolean
   onToggleCompact: () => void
+  role: AdminRole | null
 }
 
-export function Sidebar({ compact, onToggleCompact }: SidebarProps) {
+export function Sidebar({ compact, onToggleCompact, role }: SidebarProps) {
   const pathname = usePathname()
+  const navItems = getNavItemsForRole(role)
 
   return (
     <aside
@@ -34,7 +37,7 @@ export function Sidebar({ compact, onToggleCompact }: SidebarProps) {
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon
           const active = pathname.startsWith(item.href)
 

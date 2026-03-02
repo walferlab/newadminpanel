@@ -1,7 +1,8 @@
 import { auth } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import type { AdminRole } from '@/types'
+import { APPROVALS_ALLOWED_ROLES } from '@/lib/rbac'
+import { isAdminRole, type AdminRole } from '@/types'
 
 export const runtime = 'nodejs'
 
@@ -12,6 +13,7 @@ const ALLOWED_ROLES = new Set<AdminRole>([
   'junior_editor',
   'uploader',
 ])
+const APPROVAL_MANAGERS = new Set<AdminRole>(APPROVALS_ALLOWED_ROLES)
 
 function getSupabaseAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -45,7 +47,8 @@ async function canManageApprovals(userId: string) {
     return { supabase, allowed: false }
   }
 
-  const allowed = Boolean(data.approved)
+  const role = isAdminRole(data.role) ? data.role : null
+  const allowed = Boolean(data.approved) && Boolean(role && APPROVAL_MANAGERS.has(role))
   return { supabase, allowed }
 }
 

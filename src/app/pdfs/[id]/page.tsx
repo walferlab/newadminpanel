@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useUser } from '@clerk/nextjs'
 import { ArrowLeft, Save } from 'lucide-react'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
 import { supabase } from '@/lib/supabase'
+import { useAdminRole } from '@/lib/useAdminRole'
 import { calculateQualityScore } from '@/lib/revenue'
+import { recordWorkerAction, resolveWorkerIdentity } from '@/lib/workerActivity'
 import type { PDF } from '@/types'
 
 interface PdfEditorPageProps {
@@ -30,6 +33,8 @@ const EMPTY_FORM = {
 }
 
 export default function PdfEditorPage({ params }: PdfEditorPageProps) {
+  const { user } = useUser()
+  const role = useAdminRole()
   const [id, setId] = useState<string>('new')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -37,6 +42,16 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
   const router = useRouter()
 
   const isCreate = id === 'new'
+  const worker = useMemo(
+    () =>
+      resolveWorkerIdentity({
+        clerkId: user?.id ?? null,
+        name: user?.fullName ?? user?.firstName ?? null,
+        email: user?.primaryEmailAddress?.emailAddress ?? null,
+        role,
+      }),
+    [role, user],
+  )
 
   useEffect(() => {
     async function init() {
@@ -125,14 +140,29 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
       updated_at: new Date().toISOString(),
     }
 
-    const result = isCreate
-      ? await supabase.from('pdfs').insert(payload)
-      : await supabase.from('pdfs').update(payload).eq('id', Number(id))
+    const mutation = isCreate
+      ? supabase.from('pdfs').insert(payload).select('id, title').single()
+      : supabase.from('pdfs').update(payload).eq('id', Number(id)).select('id, title').single()
 
-    if (result.error) {
-      toast.error(result.error.message)
+    const { data: savedRow, error } = await mutation
+
+    if (error) {
+      toast.error(error.message)
       setSaving(false)
       return
+    }
+
+    if (worker) {
+      const resourceId = savedRow?.id ? String(savedRow.id) : id
+      const resourceTitle = savedRow?.title ?? payload.title
+      void recordWorkerAction({
+        worker,
+        action: isCreate ? 'upload' : 'edit',
+        resourceType: 'pdf',
+        resourceId,
+        resourceTitle,
+        details: isCreate ? 'Created via PDF editor' : 'Updated via PDF editor',
+      })
     }
 
     toast.success(isCreate ? 'PDF uploaded' : 'PDF updated')
