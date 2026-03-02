@@ -97,11 +97,11 @@ export function getFirebaseErrorMessage(error: unknown): string {
     const code = String((error as { code?: string }).code ?? '')
 
     if (code.includes('permission-denied')) {
-      return 'Firebase permission denied. Update Firestore rules or authenticate client users.'
+      return 'Firebase permission denied. Enable Anonymous Auth and allow signed-in users for Firestore collections: worker_presence, change_logs, and chat/*/messages.'
     }
 
     if (code.includes('unauthenticated')) {
-      return 'Firebase requires authentication. Enable anonymous sign-in in Firebase Auth.'
+      return 'Firebase requires authentication. Enable Anonymous sign-in in Firebase Console > Authentication > Sign-in method.'
     }
 
     if (code.includes('operation-not-allowed')) {
