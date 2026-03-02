@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
-import { supabase } from '@/lib/supabase'
 import { cn, formatDate } from '@/lib/utils'
 import type { ContactMessage, PDFRequest } from '@/types'
 
@@ -13,6 +12,7 @@ type RequestFilter = 'all' | RequestStatus
 
 const REQUEST_STATUSES: RequestStatus[] = ['reviewing', 'approved', 'rejected']
 const MESSAGE_FILTERS: MessageFilter[] = ['all', 'unread', 'read']
+const AUTO_REFRESH_MS = 30_000
 
 function normalizeMessageStatus(value: unknown): boolean {
   if (value === true) {
@@ -95,39 +95,41 @@ export default function DataImportsPage() {
 
   const fetchInbox = useCallback(async () => {
     setLoading(true)
+    try {
+      const response = await fetch('/api/inbox', {
+        method: 'GET',
+        cache: 'no-store',
+      })
 
-    const [messagesRes, requestsRes] = await Promise.all([
-      supabase
-        .from('contact_messages')
-        .select('id, name, email, message, status, created_at')
-        .order('created_at', { ascending: false })
-        .limit(200),
-      supabase
-        .from('pdf_requests')
-        .select('id, name, email, details, status, user_id, created_at')
-        .order('created_at', { ascending: false })
-        .limit(200),
-    ])
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string }
+        toast.error(payload.error ?? 'Failed to load inbox data')
+        setLoading(false)
+        return
+      }
 
-    if (messagesRes.error || requestsRes.error) {
-      toast.error('Failed to load inbox data from Supabase')
+      const payload = (await response.json()) as {
+        messages?: ContactMessage[]
+        requests?: PDFRequest[]
+      }
+
+      const normalizedMessages = ((payload.messages ?? []) as ContactMessage[]).map((message) => ({
+        ...message,
+        status: normalizeMessageStatus(message.status),
+      }))
+
+      const normalizedRequests = ((payload.requests ?? []) as PDFRequest[]).map((request) => ({
+        ...request,
+        status: normalizeRequestStatus(request.status),
+      }))
+
+      setMessages(normalizedMessages)
+      setRequests(normalizedRequests)
       setLoading(false)
-      return
+    } catch {
+      toast.error('Failed to load inbox data')
+      setLoading(false)
     }
-
-    const normalizedMessages = ((messagesRes.data ?? []) as ContactMessage[]).map((message) => ({
-      ...message,
-      status: normalizeMessageStatus(message.status),
-    }))
-
-    const normalizedRequests = ((requestsRes.data ?? []) as PDFRequest[]).map((request) => ({
-      ...request,
-      status: normalizeRequestStatus(request.status),
-    }))
-
-    setMessages(normalizedMessages)
-    setRequests(normalizedRequests)
-    setLoading(false)
   }, [])
 
   useEffect(() => {
@@ -135,44 +137,31 @@ export default function DataImportsPage() {
   }, [fetchInbox])
 
   useEffect(() => {
-    const channel = supabase
-      .channel('data-imports-updates')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'contact_messages',
-        },
-        () => {
-          void fetchInbox()
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pdf_requests',
-        },
-        () => {
-          void fetchInbox()
-        },
-      )
-      .subscribe()
+    const timer = window.setInterval(() => {
+      void fetchInbox()
+    }, AUTO_REFRESH_MS)
 
     return () => {
-      void supabase.removeChannel(channel)
+      window.clearInterval(timer)
     }
   }, [fetchInbox])
 
   async function updateMessageStatus(id: number, status: boolean) {
     setSavingMessageId(id)
 
-    const { error } = await supabase.from('contact_messages').update({ status }).eq('id', id)
+    const response = await fetch('/api/inbox', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'message',
+        id,
+        status,
+      }),
+    })
 
-    if (error) {
-      toast.error('Failed to update message status')
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      toast.error(payload.error ?? 'Failed to update message status')
       setSavingMessageId(null)
       return
     }
@@ -187,10 +176,19 @@ export default function DataImportsPage() {
   async function updateRequestStatus(id: number, status: RequestStatus) {
     setSavingRequestId(id)
 
-    const { error } = await supabase.from('pdf_requests').update({ status }).eq('id', id)
+    const response = await fetch('/api/inbox', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'request',
+        id,
+        status,
+      }),
+    })
 
-    if (error) {
-      toast.error('Failed to update request status')
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      toast.error(payload.error ?? 'Failed to update request status')
       setSavingRequestId(null)
       return
     }
