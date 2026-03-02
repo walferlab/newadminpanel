@@ -8,6 +8,7 @@ import { Header } from '@/components/layout/Header'
 import { StatCard } from '@/components/ui/StatCard'
 import { ActivityHeatmap } from '@/components/ui/ActivityHeatmap'
 import { db, ensureFirebaseClientAuth, getFirebaseErrorMessage } from '@/lib/firebase'
+import { isPresenceHeartbeatLog } from '@/lib/workerActivity'
 import {
   cn,
   formatDate,
@@ -257,10 +258,12 @@ export default function WorkersPage() {
     async function subscribePresence() {
       try {
         await ensureFirebaseClientAuth()
-      } catch {
+      } catch (error) {
         if (!active) {
           return
         }
+        const message = getFirebaseErrorMessage(error)
+        setFirebaseError(message)
         setPresenceRows([])
         return
       }
@@ -284,10 +287,12 @@ export default function WorkersPage() {
 
           setPresenceRows(rows)
         },
-        () => {
+        (error) => {
           if (!active) {
             return
           }
+          const message = getFirebaseErrorMessage(error)
+          setFirebaseError(message)
           setPresenceRows([])
         },
       )
@@ -385,16 +390,22 @@ export default function WorkersPage() {
     }
 
     return admins.map((admin) => {
-      const logs = (logBuckets.get(admin.id) ?? []).slice().sort((a, b) => {
+      const allLogs = (logBuckets.get(admin.id) ?? []).slice().sort((a, b) => {
         const left = getTime(a.timestamp) ?? 0
         const right = getTime(b.timestamp) ?? 0
         return right - left
       })
+      const heartbeatLogs = allLogs.filter((log) => isPresenceHeartbeatLog(log))
+      const logs = allLogs.filter((log) => !isPresenceHeartbeatLog(log))
       const presence = presenceByAdminId.get(admin.id)
 
       const times = logs
         .map((log) => getTime(log.timestamp))
         .filter((time): time is number => typeof time === 'number')
+      const heartbeatTimes = heartbeatLogs
+        .map((log) => getTime(log.timestamp))
+        .filter((time): time is number => typeof time === 'number')
+      const onlineSignalTimes = [...times, ...heartbeatTimes]
 
       const todayTimes = times.filter((time) => time >= startOfTodayMs)
       const totalUploads = logs.filter((log) => log.action === 'upload').length
@@ -425,7 +436,7 @@ export default function WorkersPage() {
           : 0
       const presenceActiveHours = activeMsToday / (60 * 60 * 1000)
 
-      const logLastSeenTime = times.length ? Math.max(...times) : null
+      const logLastSeenTime = onlineSignalTimes.length ? Math.max(...onlineSignalTimes) : null
       const presenceLastSeenTime = getPresenceHeartbeatTime(presence)
       const lastSeenTime = Math.max(logLastSeenTime ?? 0, presenceLastSeenTime ?? 0) || null
 
@@ -534,7 +545,7 @@ export default function WorkersPage() {
 
   const displayedLogs = showSelectedLogsOnly && selectedWorker
     ? selectedWorker.recentLogs
-    : recentLogs.slice(0, 40)
+    : recentLogs.filter((log) => !isPresenceHeartbeatLog(log)).slice(0, 40)
 
   return (
     <div className="animate-fade-in">

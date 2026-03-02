@@ -35,6 +35,12 @@ interface WorkerPresenceInput {
   heartbeatMs?: number
 }
 
+export const PRESENCE_HEARTBEAT_RESOURCE_ID = '__presence__'
+export const PRESENCE_HEARTBEAT_DETAILS = 'presence_heartbeat'
+const HEARTBEAT_FALLBACK_THROTTLE_MS = 55_000
+
+const fallbackHeartbeatByWorker = new Map<string, number>()
+
 function normalizeEmail(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase()
 }
@@ -91,6 +97,18 @@ export async function recordWorkerAction({
   }
 }
 
+export function isPresenceHeartbeatLog(
+  log:
+    | Pick<ChangeLog, 'resource_type' | 'resource_id' | 'details'>
+    | { resource_type?: unknown; resource_id?: unknown; details?: unknown },
+): boolean {
+  return (
+    log.resource_type === 'user' &&
+    log.resource_id === PRESENCE_HEARTBEAT_RESOURCE_ID &&
+    log.details === PRESENCE_HEARTBEAT_DETAILS
+  )
+}
+
 export async function upsertWorkerPresence({
   worker,
   currentPage,
@@ -124,6 +142,30 @@ export async function upsertWorkerPresence({
 
     return true
   } catch {
-    return false
+    const nowMs = heartbeatMs ?? Date.now()
+    const lastHeartbeat = fallbackHeartbeatByWorker.get(worker.id) ?? 0
+    if (!isOnline || nowMs - lastHeartbeat < HEARTBEAT_FALLBACK_THROTTLE_MS) {
+      return true
+    }
+
+    try {
+      await ensureFirebaseClientAuth()
+      await addDoc(collection(db, 'change_logs'), {
+        worker_id: worker.id,
+        worker_name: worker.name,
+        worker_email: worker.email,
+        worker_role: worker.role,
+        action: 'edit',
+        resource_type: 'user',
+        resource_id: PRESENCE_HEARTBEAT_RESOURCE_ID,
+        resource_title: 'Presence heartbeat',
+        details: PRESENCE_HEARTBEAT_DETAILS,
+        timestamp: serverTimestamp(),
+      })
+      fallbackHeartbeatByWorker.set(worker.id, nowMs)
+      return true
+    } catch {
+      return false
+    }
   }
 }
