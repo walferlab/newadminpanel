@@ -2,7 +2,7 @@ import type { AdminRole } from '@/types'
 
 export const APPROVALS_ALLOWED_ROLES = ['super_admin', 'admin'] as const satisfies readonly AdminRole[]
 export const WORKERS_ALLOWED_ROLES = ['super_admin', 'admin'] as const satisfies readonly AdminRole[]
-export const REVENUE_ALLOWED_ROLES = ['senior_editor'] as const satisfies readonly AdminRole[]
+export const REVENUE_ALLOWED_ROLES = ['super_admin', 'admin', 'senior_editor'] as const satisfies readonly AdminRole[]
 
 interface ProtectedRouteRule {
   path: string
