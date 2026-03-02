@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Webhook } from 'svix'
 import { createClient } from '@supabase/supabase-js'
+import { isAdminRole, type AdminRole } from '@/types'
 
 export const runtime = 'nodejs'
 
@@ -34,6 +35,32 @@ function getSupabaseAdminClient() {
       persistSession: false,
     },
   })
+}
+
+function getRolePriority(role: AdminRole): number {
+  const priorities: Record<AdminRole, number> = {
+    super_admin: 5,
+    admin: 4,
+    senior_editor: 3,
+    junior_editor: 2,
+    uploader: 1,
+  }
+
+  return priorities[role]
+}
+
+function pickApprovedRole(rows: Array<{ role?: string | null; approved?: boolean | null }>): AdminRole | null {
+  const approvedRoles = rows
+    .filter((row) => row.approved === true && isAdminRole(row.role))
+    .map((row) => row.role as AdminRole)
+
+  if (!approvedRoles.length) {
+    return null
+  }
+
+  return approvedRoles.reduce((best, current) =>
+    getRolePriority(current) > getRolePriority(best) ? current : best,
+  )
 }
 
 export async function POST(req: Request) {
@@ -83,22 +110,83 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Missing user id or email in webhook payload' }, { status: 400 })
     }
 
-    const payload = {
+    const [clerkRowsRes, emailRowsRes] = await Promise.all([
+      supabase
+        .from('admins')
+        .select('id, clerk_id, email, approved, role, created_at')
+        .eq('clerk_id', id)
+        .order('created_at', { ascending: false })
+        .limit(50),
+      supabase
+        .from('admins')
+        .select('id, clerk_id, email, approved, role, created_at')
+        .eq('email', email)
+        .order('created_at', { ascending: false })
+        .limit(50),
+    ])
+
+    if (clerkRowsRes.error || emailRowsRes.error) {
+      console.error(
+        'Supabase lookup error for Clerk webhook:',
+        clerkRowsRes.error ?? emailRowsRes.error,
+      )
+      return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 })
+    }
+
+    const clerkRows = clerkRowsRes.data ?? []
+    const emailRows = emailRowsRes.data ?? []
+    const approvedRole = pickApprovedRole(emailRows)
+    const approvedByEmail = emailRows.some((row) => row.approved === true)
+
+    const currentByClerk = clerkRows[0]
+    if (currentByClerk) {
+      const updates: Record<string, unknown> = { email, name }
+      if (approvedByEmail && approvedRole) {
+        updates.approved = true
+        updates.role = approvedRole
+      }
+
+      const { error } = await supabase.from('admins').update(updates).eq('id', currentByClerk.id)
+      if (error) {
+        console.error('Supabase update-by-clerk error for Clerk webhook:', error)
+        return NextResponse.json({ error: 'DB update failed' }, { status: 500 })
+      }
+      return NextResponse.json({ received: true }, { status: 200 })
+    }
+
+    const existingByEmail = emailRows[0]
+    if (existingByEmail) {
+      const { error } = await supabase
+        .from('admins')
+        .update({
+          clerk_id: id,
+          email,
+          name,
+        })
+        .eq('id', existingByEmail.id)
+
+      if (error) {
+        console.error('Supabase update-by-email error for Clerk webhook:', error)
+        return NextResponse.json({ error: 'DB update failed' }, { status: 500 })
+      }
+
+      return NextResponse.json({ received: true }, { status: 200 })
+    }
+
+    const { error } = await supabase.from('admins').insert({
       clerk_id: id,
       email,
       name,
       approved: false,
       role: 'uploader',
-    }
-
-    const { error } = await supabase.from('admins').upsert(payload, { onConflict: 'clerk_id' })
+    })
 
     if (error) {
-      console.error('Supabase upsert error for Clerk webhook:', error)
+      console.error('Supabase insert error for Clerk webhook:', error)
       return NextResponse.json({ error: 'DB insert failed' }, { status: 500 })
     }
 
-    console.log(`Created/updated pending admin for ${email}`)
+    console.log(`Created pending admin for ${email}`)
   }
 
   return NextResponse.json({ received: true }, { status: 200 })

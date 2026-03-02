@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation'
 import { Clock3 } from 'lucide-react'
 
 export default function AwaitingApprovalPage() {
+  const router = useRouter()
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle')
   const [syncMessage, setSyncMessage] = useState('')
 
@@ -21,6 +23,12 @@ export default function AwaitingApprovalPage() {
         }
 
         if (response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { approved?: boolean }
+          if (payload.approved === true) {
+            router.replace('/dashboard')
+            router.refresh()
+            return
+          }
           setSyncState('done')
           setSyncMessage('Your approval request has been synced.')
           return
@@ -43,7 +51,7 @@ export default function AwaitingApprovalPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [router])
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">

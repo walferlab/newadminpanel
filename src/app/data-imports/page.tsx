@@ -8,8 +8,37 @@ import { cn, formatDate } from '@/lib/utils'
 import type { ContactMessage, PDFRequest } from '@/types'
 
 type RequestStatus = PDFRequest['status']
+type MessageFilter = 'all' | 'unread' | 'read'
+type RequestFilter = 'all' | RequestStatus
 
 const REQUEST_STATUSES: RequestStatus[] = ['reviewing', 'approved', 'rejected']
+const MESSAGE_FILTERS: MessageFilter[] = ['all', 'unread', 'read']
+
+function normalizeMessageStatus(value: unknown): boolean {
+  if (value === true) {
+    return true
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    return normalized === 'true' || normalized === 'read'
+  }
+
+  if (typeof value === 'number') {
+    return value === 1
+  }
+
+  return false
+}
+
+function normalizeRequestStatus(value: unknown): RequestStatus {
+  if (typeof value !== 'string') {
+    return 'reviewing'
+  }
+
+  const normalized = value.trim().toLowerCase() as RequestStatus
+  return REQUEST_STATUSES.includes(normalized) ? normalized : 'reviewing'
+}
 
 function getRequestStatusColor(status: RequestStatus): string {
   if (status === 'approved') {
@@ -29,9 +58,15 @@ export default function DataImportsPage() {
   const [loading, setLoading] = useState(true)
   const [savingMessageId, setSavingMessageId] = useState<number | null>(null)
   const [savingRequestId, setSavingRequestId] = useState<number | null>(null)
+  const [messageFilter, setMessageFilter] = useState<MessageFilter>('all')
+  const [requestFilter, setRequestFilter] = useState<RequestFilter>('all')
 
   const unreadMessages = useMemo(
     () => messages.filter((message) => !message.status).length,
+    [messages],
+  )
+  const readMessages = useMemo(
+    () => messages.filter((message) => message.status).length,
     [messages],
   )
 
@@ -39,6 +74,24 @@ export default function DataImportsPage() {
     () => requests.filter((request) => request.status === 'reviewing').length,
     [requests],
   )
+  const filteredMessages = useMemo(() => {
+    if (messageFilter === 'read') {
+      return messages.filter((message) => message.status)
+    }
+
+    if (messageFilter === 'unread') {
+      return messages.filter((message) => !message.status)
+    }
+
+    return messages
+  }, [messageFilter, messages])
+  const filteredRequests = useMemo(() => {
+    if (requestFilter === 'all') {
+      return requests
+    }
+
+    return requests.filter((request) => request.status === requestFilter)
+  }, [requestFilter, requests])
 
   const fetchInbox = useCallback(async () => {
     setLoading(true)
@@ -48,12 +101,12 @@ export default function DataImportsPage() {
         .from('contact_messages')
         .select('id, name, email, message, status, created_at')
         .order('created_at', { ascending: false })
-        .limit(80),
+        .limit(200),
       supabase
         .from('pdf_requests')
         .select('id, name, email, details, status, user_id, created_at')
         .order('created_at', { ascending: false })
-        .limit(80),
+        .limit(200),
     ])
 
     if (messagesRes.error || requestsRes.error) {
@@ -64,12 +117,12 @@ export default function DataImportsPage() {
 
     const normalizedMessages = ((messagesRes.data ?? []) as ContactMessage[]).map((message) => ({
       ...message,
-      status: Boolean(message.status),
+      status: normalizeMessageStatus(message.status),
     }))
 
     const normalizedRequests = ((requestsRes.data ?? []) as PDFRequest[]).map((request) => ({
       ...request,
-      status: REQUEST_STATUSES.includes(request.status) ? request.status : 'reviewing',
+      status: normalizeRequestStatus(request.status),
     }))
 
     setMessages(normalizedMessages)
@@ -167,10 +220,18 @@ export default function DataImportsPage() {
       />
 
       <div className="space-y-6 pb-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="glass-card p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-text-muted">Total Messages</p>
+            <p className="mt-2 font-display text-2xl text-text-primary">{messages.length}</p>
+          </div>
           <div className="glass-card p-4">
             <p className="text-xs uppercase tracking-[0.12em] text-text-muted">Unread Messages</p>
             <p className="mt-2 font-display text-2xl text-text-primary">{unreadMessages}</p>
+          </div>
+          <div className="glass-card p-4">
+            <p className="text-xs uppercase tracking-[0.12em] text-text-muted">Read Messages</p>
+            <p className="mt-2 font-display text-2xl text-text-primary">{readMessages}</p>
           </div>
           <div className="glass-card p-4">
             <p className="text-xs uppercase tracking-[0.12em] text-text-muted">Requests In Review</p>
@@ -179,8 +240,25 @@ export default function DataImportsPage() {
         </div>
 
         <section id="messages" className="glass-card overflow-hidden">
-          <div className="border-b border-border-subtle px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
             <h2 className="text-sm font-medium text-text-primary">Contact Messages</h2>
+            <div className="inline-flex items-center gap-1 rounded-lg border border-border-subtle bg-bg-elevated/40 p-1">
+              {MESSAGE_FILTERS.map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={cn(
+                    'rounded-md px-2 py-1 text-[11px] uppercase tracking-[0.08em] transition-colors',
+                    messageFilter === filter
+                      ? 'bg-bg-primary text-text-primary'
+                      : 'text-text-muted hover:text-text-primary',
+                  )}
+                  onClick={() => setMessageFilter(filter)}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="admin-table min-w-[980px]">
@@ -205,7 +283,7 @@ export default function DataImportsPage() {
                   ))}
 
                 {!loading &&
-                  messages.map((row) => {
+                  filteredMessages.map((row) => {
                     const isSaving = savingMessageId === row.id
 
                     return (
@@ -242,11 +320,11 @@ export default function DataImportsPage() {
                     )
                   })}
 
-                {!loading && messages.length === 0 && (
+                {!loading && filteredMessages.length === 0 && (
                   <tr>
                     <td colSpan={6}>
                       <div className="py-10 text-center text-sm text-text-muted">
-                        No contact messages found
+                        No {messageFilter === 'all' ? '' : messageFilter} messages found
                       </div>
                     </td>
                   </tr>
@@ -257,8 +335,25 @@ export default function DataImportsPage() {
         </section>
 
         <section id="requests" className="glass-card overflow-hidden">
-          <div className="border-b border-border-subtle px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
             <h2 className="text-sm font-medium text-text-primary">PDF Requests</h2>
+            <div className="inline-flex items-center gap-1 rounded-lg border border-border-subtle bg-bg-elevated/40 p-1">
+              {(['all', ...REQUEST_STATUSES] as RequestFilter[]).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={cn(
+                    'rounded-md px-2 py-1 text-[11px] uppercase tracking-[0.08em] transition-colors',
+                    requestFilter === filter
+                      ? 'bg-bg-primary text-text-primary'
+                      : 'text-text-muted hover:text-text-primary',
+                  )}
+                  onClick={() => setRequestFilter(filter)}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="admin-table min-w-[980px]">
@@ -283,7 +378,7 @@ export default function DataImportsPage() {
                   ))}
 
                 {!loading &&
-                  requests.map((row) => {
+                  filteredRequests.map((row) => {
                     const isSaving = savingRequestId === row.id
 
                     return (
@@ -319,11 +414,11 @@ export default function DataImportsPage() {
                     )
                   })}
 
-                {!loading && requests.length === 0 && (
+                {!loading && filteredRequests.length === 0 && (
                   <tr>
                     <td colSpan={6}>
                       <div className="py-10 text-center text-sm text-text-muted">
-                        No PDF requests found
+                        No {requestFilter === 'all' ? '' : requestFilter} PDF requests found
                       </div>
                     </td>
                   </tr>

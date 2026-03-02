@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth, currentUser } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { APPROVALS_ALLOWED_ROLES } from '@/lib/rbac'
@@ -31,24 +31,98 @@ function getSupabaseAdminClient() {
   })
 }
 
-async function canManageApprovals(userId: string) {
+function getRolePriority(role: AdminRole): number {
+  const priorities: Record<AdminRole, number> = {
+    super_admin: 5,
+    admin: 4,
+    senior_editor: 3,
+    junior_editor: 2,
+    uploader: 1,
+  }
+
+  return priorities[role]
+}
+
+function pickHighestRole(rows: Array<{ role?: string | null; approved?: boolean | null }>): AdminRole | null {
+  const approvedRoles = rows
+    .filter((row) => row.approved === true && isAdminRole(row.role))
+    .map((row) => row.role as AdminRole)
+
+  if (approvedRoles.length > 0) {
+    return approvedRoles.reduce((best, current) =>
+      getRolePriority(current) > getRolePriority(best) ? current : best,
+    )
+  }
+
+  const roles = rows
+    .filter((row) => isAdminRole(row.role))
+    .map((row) => row.role as AdminRole)
+
+  if (!roles.length) {
+    return null
+  }
+
+  return roles.reduce((best, current) =>
+    getRolePriority(current) > getRolePriority(best) ? current : best,
+  )
+}
+
+async function canManageApprovals(userId: string, email: string | null) {
   const supabase = getSupabaseAdminClient()
   if (!supabase) {
     return { supabase: null as ReturnType<typeof getSupabaseAdminClient>, allowed: false }
   }
 
-  const { data, error } = await supabase
-    .from('admins')
-    .select('approved, role')
-    .eq('clerk_id', userId)
-    .maybeSingle()
+  const [byClerkRes, byEmailRes] = await Promise.all([
+    supabase
+      .from('admins')
+      .select('approved, role, created_at, clerk_id, email')
+      .eq('clerk_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(100),
+    email
+      ? supabase
+          .from('admins')
+          .select('approved, role, created_at, clerk_id, email')
+          .eq('email', email)
+          .order('created_at', { ascending: false })
+          .limit(100)
+      : Promise.resolve({ data: [], error: null }),
+  ])
 
-  if (error || !data) {
+  if (byClerkRes.error || byEmailRes.error) {
     return { supabase, allowed: false }
   }
 
-  const role = isAdminRole(data.role) ? data.role : null
-  const allowed = Boolean(data.approved) && Boolean(role && APPROVAL_MANAGERS.has(role))
+  const merged = [
+    ...((byClerkRes.data ?? []) as Array<{
+      approved?: boolean | null
+      role?: string | null
+      created_at?: string | null
+      clerk_id?: string | null
+      email?: string | null
+    }>),
+    ...((byEmailRes.data ?? []) as Array<{
+      approved?: boolean | null
+      role?: string | null
+      created_at?: string | null
+      clerk_id?: string | null
+      email?: string | null
+    }>),
+  ]
+
+  const dedupedMap = new Map<string, { approved?: boolean | null; role?: string | null }>()
+  for (const row of merged) {
+    const key = `${row.clerk_id ?? ''}|${row.email ?? ''}|${row.created_at ?? ''}|${row.role ?? ''}|${row.approved ?? ''}`
+    if (!dedupedMap.has(key)) {
+      dedupedMap.set(key, { approved: row.approved, role: row.role })
+    }
+  }
+
+  const rows = Array.from(dedupedMap.values())
+  const approved = rows.some((row) => row.approved === true)
+  const role = pickHighestRole(rows)
+  const allowed = approved && Boolean(role && APPROVAL_MANAGERS.has(role))
   return { supabase, allowed }
 }
 
@@ -58,7 +132,9 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { supabase, allowed } = await canManageApprovals(userId)
+  const user = await currentUser()
+  const email = user?.emailAddresses?.[0]?.emailAddress?.trim().toLowerCase() ?? null
+  const { supabase, allowed } = await canManageApprovals(userId, email)
   if (!supabase) {
     return NextResponse.json({ error: 'Missing Supabase admin configuration' }, { status: 500 })
   }
@@ -86,7 +162,9 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { supabase, allowed } = await canManageApprovals(userId)
+  const user = await currentUser()
+  const email = user?.emailAddresses?.[0]?.emailAddress?.trim().toLowerCase() ?? null
+  const { supabase, allowed } = await canManageApprovals(userId, email)
   if (!supabase) {
     return NextResponse.json({ error: 'Missing Supabase admin configuration' }, { status: 500 })
   }

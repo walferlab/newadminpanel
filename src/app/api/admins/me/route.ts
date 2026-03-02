@@ -71,25 +71,52 @@ export async function GET() {
   const user = await currentUser()
   const email = user?.emailAddresses?.[0]?.emailAddress?.trim().toLowerCase() ?? null
 
-  const rowsByClerk = await supabase
-    .from('admins')
-    .select('approved, role, created_at, clerk_id, email')
-    .eq('clerk_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(100)
-
-  let rows = (rowsByClerk.data ?? []) as Array<{ approved?: boolean | null; role?: string | null }>
-
-  if (rows.length === 0 && email) {
-    const rowsByEmail = await supabase
+  const [rowsByClerkRes, rowsByEmailRes] = await Promise.all([
+    supabase
       .from('admins')
       .select('approved, role, created_at, clerk_id, email')
-      .eq('email', email)
+      .eq('clerk_id', userId)
       .order('created_at', { ascending: false })
-      .limit(100)
+      .limit(100),
+    email
+      ? supabase
+          .from('admins')
+          .select('approved, role, created_at, clerk_id, email')
+          .eq('email', email)
+          .order('created_at', { ascending: false })
+          .limit(100)
+      : Promise.resolve({ data: [], error: null }),
+  ])
 
-    rows = (rowsByEmail.data ?? []) as Array<{ approved?: boolean | null; role?: string | null }>
+  if (rowsByClerkRes.error || rowsByEmailRes.error) {
+    return NextResponse.json({ error: 'Failed to load admin role' }, { status: 500 })
   }
+
+  const merged = [
+    ...((rowsByClerkRes.data ?? []) as Array<{
+      approved?: boolean | null
+      role?: string | null
+      created_at?: string | null
+      clerk_id?: string | null
+      email?: string | null
+    }>),
+    ...((rowsByEmailRes.data ?? []) as Array<{
+      approved?: boolean | null
+      role?: string | null
+      created_at?: string | null
+      clerk_id?: string | null
+      email?: string | null
+    }>),
+  ]
+
+  const dedupedMap = new Map<string, { approved?: boolean | null; role?: string | null }>()
+  for (const row of merged) {
+    const key = `${row.clerk_id ?? ''}|${row.email ?? ''}|${row.created_at ?? ''}|${row.role ?? ''}|${row.approved ?? ''}`
+    if (!dedupedMap.has(key)) {
+      dedupedMap.set(key, { approved: row.approved, role: row.role })
+    }
+  }
+  const rows = Array.from(dedupedMap.values())
 
   const approved = rows.some((row) => row.approved === true)
   const role = pickHighestRole(rows)

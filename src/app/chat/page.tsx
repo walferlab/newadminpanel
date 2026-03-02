@@ -5,6 +5,7 @@ import { useUser } from '@clerk/nextjs'
 import {
   addDoc,
   collection,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -13,15 +14,16 @@ import {
 import { AtSign, ChevronLeft, Hash, Reply, Send } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { db, ensureFirebaseClientAuth, getFirebaseErrorMessage } from '@/lib/firebase'
+import { useAdminRole } from '@/lib/useAdminRole'
 import { cn, formatDate, getRoleBadgeColor, getRoleLabel } from '@/lib/utils'
-import type { AdminRole, ChatMessage } from '@/types'
+import { isAdminRole, type AdminRole, type ChatMessage } from '@/types'
 
 const CHANNELS = ['general', 'uploads', 'review', 'alerts']
 
 const DEMO_USER = {
   id: 'demo-user',
-  name: 'Admin',
-  role: 'admin' as AdminRole,
+  name: 'Guest',
+  role: 'uploader' as AdminRole,
 }
 
 function getPreview(content: string, maxLength = 72): string {
@@ -35,8 +37,10 @@ function getPreview(content: string, maxLength = 72): string {
 
 export default function ChatPage() {
   const { user } = useUser()
+  const role = useAdminRole()
   const [channel, setChannel] = useState(CHANNELS[0])
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [senderRoles, setSenderRoles] = useState<Record<string, AdminRole>>({})
   const [input, setInput] = useState('')
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [loading, setLoading] = useState(true)
@@ -47,7 +51,6 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const messageListRef = useRef<HTMLDivElement>(null)
   const composerInputRef = useRef<HTMLInputElement>(null)
-  const hasInitialScrollRef = useRef(false)
 
   const messagesById = useMemo(
     () => new Map(messages.map((message) => [message.id, message] as const)),
@@ -70,14 +73,6 @@ export default function ChatPage() {
 
     return ids
   }, [messages, messagesById])
-
-  function isNearBottom() {
-    const el = messageListRef.current
-    if (!el) {
-      return true
-    }
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 120
-  }
 
   function scrollToBottom(behavior: ScrollBehavior = 'auto') {
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' })
@@ -103,7 +98,7 @@ export default function ChatPage() {
     }, 1800)
   }
 
-  function selectChannel(nextChannel: string) {
+function selectChannel(nextChannel: string) {
     setChannel(nextChannel)
     setMobileView('chat')
     focusComposer()
@@ -113,7 +108,6 @@ export default function ChatPage() {
     setLoading(true)
     setFirebaseError(null)
     setReplyTo(null)
-    hasInitialScrollRef.current = false
 
     let active = true
     let unsubscribe = () => {}
@@ -149,7 +143,8 @@ export default function ChatPage() {
 
       const messagesQuery = query(
         collection(db, 'chat', channel, 'messages'),
-        orderBy('timestamp', 'asc'),
+        orderBy('timestamp', 'desc'),
+        limit(300),
       )
 
       unsubscribe = onSnapshot(
@@ -159,23 +154,19 @@ export default function ChatPage() {
             return
           }
 
-          const shouldStickToBottom = !hasInitialScrollRef.current || isNearBottom()
           const rows = snapshot.docs.map((doc) => {
             const data = doc.data() as Omit<ChatMessage, 'id'>
             return {
               id: doc.id,
               ...data,
             }
-          })
+          }).reverse()
 
           setMessages(rows)
           setLoading(false)
 
           requestAnimationFrame(() => {
-            if (shouldStickToBottom) {
-              scrollToBottom(hasInitialScrollRef.current ? 'smooth' : 'auto')
-            }
-            hasInitialScrollRef.current = true
+            scrollToBottom('auto')
           })
         },
         (error) => {
@@ -213,6 +204,64 @@ export default function ChatPage() {
     }
   }, [channel])
 
+  useEffect(() => {
+    let active = true
+    let unsubscribe = () => {}
+
+    async function setupPresenceRoleListener() {
+      try {
+        await ensureFirebaseClientAuth()
+      } catch {
+        if (!active) {
+          return
+        }
+        setSenderRoles({})
+        return
+      }
+
+      const presenceQuery = query(collection(db, 'worker_presence'), limit(500))
+
+      unsubscribe = onSnapshot(
+        presenceQuery,
+        (snapshot) => {
+          if (!active) {
+            return
+          }
+
+          const nextRoles: Record<string, AdminRole> = {}
+          for (const doc of snapshot.docs) {
+            const data = doc.data() as { worker_id?: unknown; worker_role?: unknown }
+            if (!isAdminRole(data.worker_role)) {
+              continue
+            }
+
+            const workerId = typeof data.worker_id === 'string' ? data.worker_id.trim() : ''
+            if (!workerId) {
+              continue
+            }
+
+            nextRoles[workerId] = data.worker_role
+          }
+
+          setSenderRoles(nextRoles)
+        },
+        () => {
+          if (!active) {
+            return
+          }
+          setSenderRoles({})
+        },
+      )
+    }
+
+    void setupPresenceRoleListener()
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
+
   async function sendMessage(event: FormEvent) {
     event.preventDefault()
 
@@ -226,7 +275,8 @@ export default function ChatPage() {
       user?.firstName ??
       user?.primaryEmailAddress?.emailAddress ??
       DEMO_USER.name
-    const senderRole = (user?.publicMetadata?.role as AdminRole | undefined) ?? DEMO_USER.role
+    const metadataRole = isAdminRole(user?.publicMetadata?.role) ? user.publicMetadata.role : null
+    const senderRole = role ?? metadataRole ?? DEMO_USER.role
     const mentions = Array.from(input.matchAll(/@(\w+)/g)).map((match) => match[1])
 
     try {
@@ -295,6 +345,9 @@ export default function ChatPage() {
               const isHighlighted =
                 highlightedMessageId === message.id || replyTo?.id === message.id
               const gotReplyFromOtherUser = repliedTargetIds.has(message.id)
+              const messageRole =
+                senderRoles[message.sender_id] ??
+                (isAdminRole(message.sender_role) ? message.sender_role : 'uploader')
 
               return (
                 <div
@@ -312,8 +365,8 @@ export default function ChatPage() {
                       <span className="text-xs font-medium text-text-primary">
                         {message.sender_name}
                       </span>
-                      <span className={cn('badge text-[9px]', getRoleBadgeColor(message.sender_role))}>
-                        {getRoleLabel(message.sender_role)}
+                      <span className={cn('badge text-[9px]', getRoleBadgeColor(messageRole))}>
+                        {getRoleLabel(messageRole)}
                       </span>
                       <span className="text-[10px] text-text-muted">
                         {formatDate(message.timestamp, 'relative')}
