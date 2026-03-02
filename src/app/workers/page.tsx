@@ -440,10 +440,10 @@ export default function WorkersPage() {
       const presenceLastSeenTime = getPresenceHeartbeatTime(presence)
       const lastSeenTime = Math.max(logLastSeenTime ?? 0, presenceLastSeenTime ?? 0) || null
 
-      // make the online check more forgiving by trusting the explicit flag
       const presenceOnline =
-        (presence?.is_online === true) ||
-        (typeof presenceLastSeenTime === 'number' && now - presenceLastSeenTime <= ONLINE_THRESHOLD_MS)
+        presence?.is_online === false
+          ? false
+          : typeof presenceLastSeenTime === 'number' && now - presenceLastSeenTime <= ONLINE_THRESHOLD_MS
       const logOnline =
         typeof logLastSeenTime === 'number' && now - logLastSeenTime <= ONLINE_THRESHOLD_MS
 

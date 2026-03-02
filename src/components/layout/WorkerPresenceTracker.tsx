@@ -26,6 +26,8 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
   const pathname = usePathname()
   const { user } = useUser()
   const pathnameRef = useRef(pathname)
+  const workerRef = useRef<ReturnType<typeof resolveWorkerIdentity>>(null)
+  const stoppedRef = useRef(false)
 
   const sessionRef = useRef({
     activeDate: getTodayKey(),
@@ -34,16 +36,24 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
     lastInteractionMs: Date.now(),
   })
 
+  const clerkId = user?.id ?? null
+  const workerName = user?.fullName ?? user?.firstName ?? null
+  const workerEmail = user?.primaryEmailAddress?.emailAddress ?? null
+
   const worker = useMemo(
     () =>
       resolveWorkerIdentity({
-        clerkId: user?.id ?? null,
-        name: user?.fullName ?? user?.firstName ?? null,
-        email: user?.primaryEmailAddress?.emailAddress ?? null,
+        clerkId,
+        name: workerName,
+        email: workerEmail,
         role,
       }),
-    [role, user],
+    [clerkId, role, workerEmail, workerName],
   )
+
+  useEffect(() => {
+    workerRef.current = worker
+  }, [worker])
 
   useEffect(() => {
     pathnameRef.current = pathname
@@ -58,10 +68,15 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
       return document.visibilityState !== 'hidden'
     }
 
-    let stopped = false
+    stoppedRef.current = false
     const interactionOptions: AddEventListenerOptions = { passive: true }
 
     const flushPresence = async () => {
+      const currentWorker = workerRef.current
+      if (!currentWorker) {
+        return
+      }
+
       const nowMs = Date.now()
       const todayKey = getTodayKey(nowMs)
 
@@ -83,7 +98,7 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
       sessionRef.current.lastFlushMs = nowMs
 
       const ok = await upsertWorkerPresence({
-        worker,
+        worker: currentWorker,
         currentPage: pathnameRef.current,
         isOnline: isVisible(),
         activeMsToday: sessionRef.current.activeMsToday,
@@ -92,7 +107,7 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
         heartbeatMs: nowMs,
       })
 
-      if (!ok && !stopped) {
+      if (!ok && !stoppedRef.current) {
         console.warn('Worker presence heartbeat failed')
       }
     }
@@ -102,7 +117,7 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
     }
 
     const tick = () => {
-      if (stopped) {
+      if (stoppedRef.current) {
         return
       }
       void flushPresence()
@@ -129,10 +144,15 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
       tick()
     }
 
-    const handlePageHide = () => {
-      stopped = true
+    const setOffline = () => {
+      const currentWorker = workerRef.current
+      if (!currentWorker) {
+        return
+      }
+
+      stoppedRef.current = true
       void upsertWorkerPresence({
-        worker,
+        worker: currentWorker,
         currentPage: pathnameRef.current,
         isOnline: false,
         activeMsToday: sessionRef.current.activeMsToday,
@@ -140,6 +160,14 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
         lastSeenIso: new Date().toISOString(),
         heartbeatMs: Date.now(),
       })
+    }
+
+    const handlePageHide = () => {
+      setOffline()
+    }
+
+    const handleBeforeUnload = () => {
+      setOffline()
     }
 
     window.addEventListener('mousemove', markInteraction, interactionOptions)
@@ -149,10 +177,11 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
     window.addEventListener('focus', handleFocus)
     window.addEventListener('blur', handleBlur)
     window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('beforeunload', handleBeforeUnload)
     document.addEventListener('visibilitychange', handleVisibility)
 
     return () => {
-      stopped = true
+      stoppedRef.current = true
       window.clearInterval(timer)
       window.removeEventListener('mousemove', markInteraction)
       window.removeEventListener('keydown', markInteraction)
@@ -161,18 +190,27 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('blur', handleBlur)
       window.removeEventListener('pagehide', handlePageHide)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
       document.removeEventListener('visibilitychange', handleVisibility)
-      void upsertWorkerPresence({
-        worker,
-        currentPage: pathnameRef.current,
-        isOnline: false,
-        activeMsToday: sessionRef.current.activeMsToday,
-        activeDate: sessionRef.current.activeDate,
-        lastSeenIso: new Date().toISOString(),
-        heartbeatMs: Date.now(),
-      })
     }
-  }, [worker])
+  }, [worker?.id])
+
+  useEffect(() => {
+    if (!worker || typeof window === 'undefined') {
+      return
+    }
+
+    const nowMs = Date.now()
+    void upsertWorkerPresence({
+      worker,
+      currentPage: pathname,
+      isOnline: document.visibilityState !== 'hidden',
+      activeMsToday: sessionRef.current.activeMsToday,
+      activeDate: sessionRef.current.activeDate,
+      lastSeenIso: new Date(nowMs).toISOString(),
+      heartbeatMs: nowMs,
+    })
+  }, [pathname, worker?.id])
 
   return null
 }
