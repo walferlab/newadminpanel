@@ -5,16 +5,17 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
-import { BookOpen, Download, Edit2, Plus, Search, Star, Trash2 } from 'lucide-react'
+import { AlertTriangle, BookOpen, Download, Edit2, Plus, Search, Star, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
 import { DataTable, type Column } from '@/components/ui/DataTable'
+import { Modal } from '@/components/ui/Modal'
 import { calculateQualityScore } from '@/lib/revenue'
 import { supabase } from '@/lib/supabase'
 import { useAdminRole } from '@/lib/useAdminRole'
 import { cn, formatDate, formatNumber } from '@/lib/utils'
 import { recordWorkerAction, resolveWorkerIdentity } from '@/lib/workerActivity'
-import type { PDF } from '@/types'
+import { ROLE_PERMISSIONS, type PDF } from '@/types'
 
 function BooksPageContent() {
   const { user } = useUser()
@@ -25,6 +26,8 @@ function BooksPageContent() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState(querySearch)
   const [searchInput, setSearchInput] = useState(querySearch)
+  const [bookPendingDelete, setBookPendingDelete] = useState<PDF | null>(null)
+  const [deletingBookId, setDeletingBookId] = useState<number | null>(null)
   const worker = useMemo(
     () =>
       resolveWorkerIdentity({
@@ -35,6 +38,7 @@ function BooksPageContent() {
       }),
     [role, user],
   )
+  const canDeleteBooks = role ? ROLE_PERMISSIONS[role].canDeleteBooks : false
 
   const fetchBooks = useCallback(async () => {
     setLoading(true)
@@ -73,31 +77,67 @@ function BooksPageContent() {
     return () => clearTimeout(timer)
   }, [searchInput])
 
-  async function handleDelete(book: PDF) {
-    if (!window.confirm('Delete this book permanently?')) {
+  function requestDelete(book: PDF) {
+    if (!canDeleteBooks) {
+      toast.error("You don't have permission to delete books")
       return
     }
 
-    const { error } = await supabase.from('pdfs').delete().eq('id', book.id)
+    setBookPendingDelete(book)
+  }
 
-    if (error) {
-      toast.error('Delete failed')
+  function closeDeleteModal() {
+    if (deletingBookId !== null) {
       return
     }
 
-    if (worker) {
-      void recordWorkerAction({
-        worker,
-        action: 'delete',
-        resourceType: 'pdf',
-        resourceId: String(book.id),
-        resourceTitle: book.title,
-        details: 'Deleted from books table',
+    setBookPendingDelete(null)
+  }
+
+  async function handleDelete() {
+    if (!bookPendingDelete || deletingBookId !== null) {
+      return
+    }
+
+    const book = bookPendingDelete
+    setDeletingBookId(book.id)
+
+    try {
+      const response = await fetch(`/api/books/${book.id}`, {
+        method: 'DELETE',
       })
-    }
 
-    toast.success('Book deleted')
-    void fetchBooks()
+      let payload: { error?: string } | null = null
+      try {
+        payload = (await response.json()) as { error?: string }
+      } catch {
+        payload = null
+      }
+
+      if (!response.ok) {
+        toast.error(payload?.error ?? 'Delete failed')
+        return
+      }
+
+      if (worker) {
+        void recordWorkerAction({
+          worker,
+          action: 'delete',
+          resourceType: 'pdf',
+          resourceId: String(book.id),
+          resourceTitle: book.title,
+          details: 'Deleted from books table',
+        })
+      }
+
+      toast.success('Book deleted')
+      setBookPendingDelete(null)
+      void fetchBooks()
+    } catch {
+      toast.error('Delete failed')
+    } finally {
+      setDeletingBookId(null)
+    }
   }
 
   async function handleToggleFeatured(book: PDF) {
@@ -235,10 +275,15 @@ function BooksPageContent() {
             <Edit2 size={13} />
           </Link>
           <button
-            onClick={() => void handleDelete(book)}
-            className="inline-flex h-8 w-8 items-center justify-center border border-border-subtle text-text-muted transition-colors hover:border-accent-red/50 hover:text-accent-red"
+            onClick={() => requestDelete(book)}
+            className={cn(
+              'inline-flex h-8 w-8 items-center justify-center border border-border-subtle text-text-muted transition-colors hover:border-accent-red/50 hover:text-accent-red',
+              !canDeleteBooks &&
+                'cursor-not-allowed opacity-50 hover:border-border-subtle hover:text-text-muted',
+            )}
             type="button"
             aria-label="Delete"
+            disabled={!canDeleteBooks}
           >
             <Trash2 size={13} />
           </button>
@@ -280,6 +325,45 @@ function BooksPageContent() {
           />
         </div>
       </div>
+
+      <Modal
+        open={Boolean(bookPendingDelete)}
+        onClose={closeDeleteModal}
+        title="Delete Book"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-accent-red/30 bg-accent-red/10 p-3">
+            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 text-accent-red" />
+            <p className="text-sm text-text-secondary">
+              Permanently delete{' '}
+              <span className="font-semibold text-text-primary">{bookPendingDelete?.title}</span>?
+              Linked download events will also be removed.
+            </p>
+          </div>
+
+          <p className="text-xs text-text-muted">This action cannot be undone.</p>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="btn-secondary text-xs"
+              onClick={closeDeleteModal}
+              disabled={deletingBookId !== null}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-danger text-xs"
+              onClick={() => void handleDelete()}
+              disabled={deletingBookId !== null}
+            >
+              {deletingBookId !== null ? 'Deleting...' : 'Delete permanently'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
