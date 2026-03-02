@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   CheckCircle,
   Clock,
@@ -21,15 +21,21 @@ interface PendingUser extends Admin {
 export default function ApprovalsPage() {
   const [users, setUsers] = useState<PendingUser[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved'>('pending')
 
-  async function fetchUsers() {
-    setLoading(true)
+  const fetchUsers = useCallback(async (background = false) => {
+    if (background) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
 
     const response = await fetch('/api/admins', { method: 'GET', cache: 'no-store' })
     if (!response.ok) {
       toast.error('Failed to load users')
       setUsers([])
+      setRefreshing(false)
       setLoading(false)
       return
     }
@@ -42,12 +48,13 @@ export default function ApprovalsPage() {
     }))
     setUsers(normalized)
 
+    setRefreshing(false)
     setLoading(false)
-  }
+  }, [])
 
   useEffect(() => {
-    fetchUsers()
-  }, [])
+    void fetchUsers(false)
+  }, [fetchUsers])
 
   async function handleApprove(id: string) {
     const response = await fetch('/api/admins', {
@@ -62,7 +69,7 @@ export default function ApprovalsPage() {
     }
 
     toast.success('User approved')
-    fetchUsers()
+    void fetchUsers(true)
   }
 
   async function handleReject(id: string) {
@@ -78,7 +85,7 @@ export default function ApprovalsPage() {
     }
 
     toast.success('User updated')
-    fetchUsers()
+    void fetchUsers(true)
   }
 
   async function handleRoleChange(id: string, role: AdminRole) {
@@ -94,7 +101,7 @@ export default function ApprovalsPage() {
     }
 
     toast.success('Role changed')
-    fetchUsers()
+    void fetchUsers(true)
   }
 
   const filtered = users.filter((user) => {
@@ -112,7 +119,20 @@ export default function ApprovalsPage() {
 
   return (
     <div className="animate-fade-in">
-      <Header title="User Approvals" subtitle="Manage admin access and roles" />
+      <Header
+        title="User Approvals"
+        subtitle="Manage admin access and roles"
+        rightSlot={
+          <button
+            type="button"
+            className="btn-secondary text-xs"
+            onClick={() => void fetchUsers(true)}
+            disabled={loading || refreshing}
+          >
+            {loading || refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        }
+      />
 
       <div className="space-y-6 p-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

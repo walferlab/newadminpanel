@@ -130,7 +130,25 @@ export async function PATCH(req: Request) {
 
   const body = (await req.json()) as
     | { kind: 'message'; id: number; status: boolean }
+    | { kind: 'messages_all'; status: boolean }
     | { kind: 'request'; id: number; status: RequestStatus }
+
+  if (body.kind === 'messages_all') {
+    if (typeof body.status !== 'boolean') {
+      return NextResponse.json({ error: 'Invalid bulk message update payload' }, { status: 400 })
+    }
+
+    const { error } = await supabase
+      .from('contact_messages')
+      .update({ status: body.status })
+      .eq('status', !body.status)
+
+    if (error) {
+      return NextResponse.json({ error: 'Failed to update message statuses' }, { status: 500 })
+    }
+
+    return NextResponse.json({ ok: true }, { status: 200 })
+  }
 
   if (body.kind === 'message') {
     if (typeof body.id !== 'number' || typeof body.status !== 'boolean') {

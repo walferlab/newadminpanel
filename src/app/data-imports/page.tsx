@@ -56,6 +56,7 @@ export default function DataImportsPage() {
   const [messages, setMessages] = useState<ContactMessage[]>([])
   const [requests, setRequests] = useState<PDFRequest[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [savingMessageId, setSavingMessageId] = useState<number | null>(null)
   const [savingRequestId, setSavingRequestId] = useState<number | null>(null)
   const [messageFilter, setMessageFilter] = useState<MessageFilter>('all')
@@ -93,8 +94,13 @@ export default function DataImportsPage() {
     return requests.filter((request) => request.status === requestFilter)
   }, [requestFilter, requests])
 
-  const fetchInbox = useCallback(async () => {
-    setLoading(true)
+  const fetchInbox = useCallback(async (background = false) => {
+    if (background) {
+      setRefreshing(true)
+    } else {
+      setLoading(true)
+    }
+
     try {
       const response = await fetch('/api/inbox', {
         method: 'GET',
@@ -104,6 +110,7 @@ export default function DataImportsPage() {
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string }
         toast.error(payload.error ?? 'Failed to load inbox data')
+        setRefreshing(false)
         setLoading(false)
         return
       }
@@ -125,20 +132,22 @@ export default function DataImportsPage() {
 
       setMessages(normalizedMessages)
       setRequests(normalizedRequests)
+      setRefreshing(false)
       setLoading(false)
     } catch {
       toast.error('Failed to load inbox data')
+      setRefreshing(false)
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    void fetchInbox()
+    void fetchInbox(false)
   }, [fetchInbox])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void fetchInbox()
+      void fetchInbox(true)
     }, AUTO_REFRESH_MS)
 
     return () => {
@@ -209,10 +218,10 @@ export default function DataImportsPage() {
           <button
             type="button"
             className="btn-secondary text-xs"
-            onClick={() => void fetchInbox()}
-            disabled={loading}
+            onClick={() => void fetchInbox(true)}
+            disabled={loading || refreshing}
           >
-            {loading ? 'Refreshing...' : 'Refresh'}
+            {loading || refreshing ? 'Refreshing...' : 'Refresh'}
           </button>
         }
       />

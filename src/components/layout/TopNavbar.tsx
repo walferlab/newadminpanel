@@ -8,17 +8,23 @@ import { useClerk, useUser } from '@clerk/nextjs'
 import { Bell, CheckCheck, LogOut, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getNavLabel } from '@/config/navigation'
-import { supabase } from '@/lib/supabase'
 import { cn, formatDate, getRoleLabel } from '@/lib/utils'
 import type { AdminRole } from '@/types'
 
 interface NotificationItem {
   id: string
-  type: 'message' | 'request'
+  type: 'message' | 'request' | 'approval'
   title: string
   subtitle: string
   createdAt: string
   href: string
+}
+
+interface NotificationCounts {
+  unreadMessages: number
+  pendingPdfRequests: number
+  pendingApprovals: number
+  total: number
 }
 
 interface TopNavbarProps {
@@ -32,132 +38,105 @@ export function TopNavbar({ compactSidebar = false, role }: TopNavbarProps) {
   const { user } = useUser()
   const { signOut } = useClerk()
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const previousCountsRef = useRef<NotificationCounts | null>(null)
+  const hasLoadedRef = useRef(false)
 
   const [search, setSearch] = useState('')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [loadingNotifications, setLoadingNotifications] = useState(false)
-  const [unreadMessages, setUnreadMessages] = useState(0)
-  const [pendingRequests, setPendingRequests] = useState(0)
+  const [counts, setCounts] = useState<NotificationCounts>({
+    unreadMessages: 0,
+    pendingPdfRequests: 0,
+    pendingApprovals: 0,
+    total: 0,
+  })
   const [items, setItems] = useState<NotificationItem[]>([])
 
   const roleLabel = getRoleLabel(role ?? 'uploader')
-  const totalUnread = unreadMessages + pendingRequests
+  const totalUnread = counts.total
 
-  const refreshCounts = useCallback(async () => {
-    const [messagesRes, requestsRes] = await Promise.all([
-      supabase
-        .from('contact_messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', false),
-      supabase
-        .from('pdf_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'reviewing'),
-    ])
+  const refreshNotifications = useCallback(async (notifyOnIncrease: boolean) => {
+    setLoadingNotifications((prev) => (notificationsOpen ? true : prev))
 
-    setUnreadMessages(messagesRes.count ?? 0)
-    setPendingRequests(requestsRes.count ?? 0)
-  }, [])
+    try {
+      const response = await fetch('/api/notifications', {
+        method: 'GET',
+        cache: 'no-store',
+      })
 
-  const refreshItems = useCallback(async () => {
-    setLoadingNotifications(true)
+      if (!response.ok) {
+        setLoadingNotifications(false)
+        return
+      }
 
-    const [messagesRes, requestsRes] = await Promise.all([
-      supabase
-        .from('contact_messages')
-        .select('id, name, email, created_at, status')
-        .eq('status', false)
-        .order('created_at', { ascending: false })
-        .limit(5),
-      supabase
-        .from('pdf_requests')
-        .select('id, name, email, status, created_at')
-        .eq('status', 'reviewing')
-        .order('created_at', { ascending: false })
-        .limit(5),
-    ])
+      const payload = (await response.json()) as {
+        counts?: NotificationCounts
+        items?: NotificationItem[]
+      }
+      const nextCounts = payload.counts ?? {
+        unreadMessages: 0,
+        pendingPdfRequests: 0,
+        pendingApprovals: 0,
+        total: 0,
+      }
+      const nextItems = payload.items ?? []
 
-    const messageItems: NotificationItem[] = (messagesRes.data ?? []).map((row) => ({
-      id: `message-${row.id}`,
-      type: 'message',
-      title: `Message from ${row.name}`,
-      subtitle: row.email,
-      createdAt: row.created_at,
-      href: '/data-imports#messages',
-    }))
+      if (notifyOnIncrease && hasLoadedRef.current && previousCountsRef.current) {
+        const prev = previousCountsRef.current
 
-    const requestItems: NotificationItem[] = (requestsRes.data ?? []).map((row) => ({
-      id: `request-${row.id}`,
-      type: 'request',
-      title: `Request from ${row.name}`,
-      subtitle: row.email,
-      createdAt: row.created_at,
-      href: '/data-imports#requests',
-    }))
+        const newMessages = Math.max(0, nextCounts.unreadMessages - prev.unreadMessages)
+        const newRequests = Math.max(0, nextCounts.pendingPdfRequests - prev.pendingPdfRequests)
+        const newApprovals = Math.max(0, nextCounts.pendingApprovals - prev.pendingApprovals)
 
-    const merged = [...messageItems, ...requestItems]
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 8)
+        if (newMessages > 0) {
+          toast(`${newMessages} new unread message${newMessages > 1 ? 's' : ''}`)
+        }
+        if (newRequests > 0) {
+          toast(`${newRequests} new PDF request${newRequests > 1 ? 's' : ''} pending`)
+        }
+        if (newApprovals > 0) {
+          toast(`${newApprovals} new approval request${newApprovals > 1 ? 's' : ''}`)
+        }
+      }
 
-    setItems(merged)
-    setLoadingNotifications(false)
-  }, [])
-
-  useEffect(() => {
-    void refreshCounts()
-    const timer = setInterval(() => void refreshCounts(), 60000)
-    return () => clearInterval(timer)
-  }, [refreshCounts])
-
-  useEffect(() => {
-    const channel = supabase
-      .channel('top-navbar-notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'contact_messages',
-        },
-        () => {
-          void refreshCounts()
-          if (notificationsOpen) {
-            void refreshItems()
-          }
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pdf_requests',
-        },
-        () => {
-          void refreshCounts()
-          if (notificationsOpen) {
-            void refreshItems()
-          }
-        },
-      )
-      .subscribe()
-
-    return () => {
-      void supabase.removeChannel(channel)
+      previousCountsRef.current = nextCounts
+      hasLoadedRef.current = true
+      setCounts(nextCounts)
+      setItems(nextItems)
+      setLoadingNotifications(false)
+    } catch {
+      setLoadingNotifications(false)
     }
-  }, [notificationsOpen, refreshCounts, refreshItems])
+  }, [notificationsOpen])
+
+  useEffect(() => {
+    void refreshNotifications(false)
+    const timer = setInterval(() => void refreshNotifications(true), 25000)
+    return () => clearInterval(timer)
+  }, [refreshNotifications])
 
   useEffect(() => {
     if (!notificationsOpen) {
       return
     }
 
-    void refreshItems()
-  }, [notificationsOpen, refreshItems])
+    void refreshNotifications(false)
+  }, [notificationsOpen, refreshNotifications])
 
   useEffect(() => {
     setNotificationsOpen(false)
   }, [pathname])
+
+  useEffect(() => {
+    const onFocus = () => {
+      void refreshNotifications(true)
+    }
+
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [refreshNotifications])
 
   useEffect(() => {
     function handleOutsideClick(event: MouseEvent) {
@@ -174,18 +153,23 @@ export function TopNavbar({ compactSidebar = false, role }: TopNavbarProps) {
   }, [])
 
   async function markMessagesAsRead() {
-    const { error } = await supabase
-      .from('contact_messages')
-      .update({ status: true })
-      .eq('status', false)
+    const response = await fetch('/api/inbox', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'messages_all',
+        status: true,
+      }),
+    })
 
-    if (error) {
-      toast.error('Failed to mark messages as read')
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      toast.error(payload.error ?? 'Failed to mark messages as read')
       return
     }
 
-    await refreshCounts()
-    await refreshItems()
+    await refreshNotifications(false)
+    toast.success('Unread messages marked as read')
   }
 
   function handleQuickSearch(event: FormEvent<HTMLFormElement>) {
@@ -253,7 +237,7 @@ export function TopNavbar({ compactSidebar = false, role }: TopNavbarProps) {
                   type="button"
                   className="inline-flex items-center gap-1 text-xs text-text-muted transition-colors hover:text-text-primary"
                   onClick={() => void markMessagesAsRead()}
-                  disabled={unreadMessages === 0}
+                  disabled={counts.unreadMessages === 0}
                 >
                   <CheckCheck size={13} />
                   Mark messages read
@@ -273,7 +257,12 @@ export function TopNavbar({ compactSidebar = false, role }: TopNavbarProps) {
                       <p className="text-sm text-text-primary">{item.title}</p>
                       <p className="truncate text-xs text-text-muted">{item.subtitle}</p>
                       <p className="mt-1 text-[11px] text-text-muted">
-                        {item.type === 'request' ? 'Request' : 'Message'} - {formatDate(item.createdAt, 'relative')}
+                        {item.type === 'approval'
+                          ? 'Approval'
+                          : item.type === 'request'
+                            ? 'Request'
+                            : 'Message'}{' '}
+                        - {formatDate(item.createdAt, 'relative')}
                       </p>
                     </Link>
                   ))}

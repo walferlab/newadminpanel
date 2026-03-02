@@ -319,11 +319,6 @@ export default function WorkersPage() {
     const presenceByAdminId = new Map<string, WorkerPresenceRow>()
     const keyToAdminId = new Map<string, string>()
 
-    // we'll also collect any rows/logs that couldn't be matched so we
-    // can debug mapping issues later (and optionally emit them)
-    const unmappedLogs: ChangeLog[] = []
-    const unmappedPresence: WorkerPresenceRow[] = []
-
     for (const admin of admins) {
       const keys = [
         normalize(admin.id),
@@ -351,7 +346,6 @@ export default function WorkersPage() {
         .find((value): value is string => Boolean(value))
 
       if (!matchedAdminId) {
-        unmappedLogs.push(log)
         continue
       }
 
@@ -373,7 +367,6 @@ export default function WorkersPage() {
         .find((value): value is string => Boolean(value))
 
       if (!matchedAdminId) {
-        unmappedPresence.push(row)
         continue
       }
 
@@ -383,11 +376,6 @@ export default function WorkersPage() {
       if (!prev || nextTime >= prevTime) {
         presenceByAdminId.set(matchedAdminId, row)
       }
-    }
-
-    if (unmappedLogs.length > 0 || unmappedPresence.length > 0) {
-      console.debug('Workers page - unmapped logs', unmappedLogs)
-      console.debug('Workers page - unmapped presence rows', unmappedPresence)
     }
 
     return admins.map((admin) => {
@@ -538,9 +526,6 @@ export default function WorkersPage() {
   const selectedWorker =
     filteredWorkers.find((worker) => worker.admin.id === selectedWorkerId) ?? null
 
-  // debug toggle state for displaying raw firebase/admin data
-  const [showRaw, setShowRaw] = useState(false)
-
   const totalOnline = workers.filter((worker) => worker.isOnline).length
   const totalUploadsToday = workers.reduce((sum, worker) => sum + worker.uploadsToday, 0)
   const totalActionsToday = workers.reduce((sum, worker) => sum + worker.actionsToday, 0)
@@ -582,13 +567,6 @@ export default function WorkersPage() {
             >
               Export JSON
             </button>
-            <button
-              type="button"
-              className="btn-tertiary text-xs"
-              onClick={() => setShowRaw((prev) => !prev)}
-            >
-              {showRaw ? 'Hide raw data' : 'Show raw data'}
-            </button>
           </div>
         }
       />
@@ -604,15 +582,6 @@ export default function WorkersPage() {
           {firebaseError}
         </div>
       ) : null}
-
-      {showRaw && (
-        <div className="mx-6 mb-3 space-y-4 rounded border border-border-subtle bg-bg-elevated p-3 text-xs">
-          <p className="font-medium">Raw data (admins / presence / recent logs):</p>
-          <pre className="max-h-64 overflow-auto">
-            {JSON.stringify({ admins, presenceRows, recentLogs, workers }, null, 2)}
-          </pre>
-        </div>
-      )}
 
       <div className="space-y-6 p-6">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
