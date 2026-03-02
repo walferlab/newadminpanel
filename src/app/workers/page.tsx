@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, Circle, Clock3, RefreshCw, Upload, Users } from 'lucide-react'
-import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
 import { StatCard } from '@/components/ui/StatCard'
@@ -28,6 +28,7 @@ interface WorkerStats {
   uploadsToday: number
   recentActions24h: number
   activeHoursToday: number
+  activeHoursTotal: number
   lastSeen: string | null
   isOnline: boolean
   currentPage: string | null
@@ -48,6 +49,7 @@ interface WorkerPresenceRow {
   updated_at?: unknown
   current_page?: string
   active_ms_today?: number
+  active_ms_total?: number
   active_date?: string
 }
 
@@ -200,7 +202,6 @@ export default function WorkersPage() {
       const logsQuery = query(
         collection(db, 'change_logs'),
         orderBy('timestamp', 'desc'),
-        limit(500),
       )
 
       unsubscribe = onSnapshot(
@@ -268,7 +269,7 @@ export default function WorkersPage() {
         return
       }
 
-      const presenceQuery = query(collection(db, 'worker_presence'), limit(500))
+      const presenceQuery = query(collection(db, 'worker_presence'))
 
       unsubscribe = onSnapshot(
         presenceQuery,
@@ -434,7 +435,12 @@ export default function WorkersPage() {
         presence.active_date === todayKey
           ? presence.active_ms_today
           : 0
+      const activeMsTotal =
+        typeof presence?.active_ms_total === 'number' && presence.active_ms_total >= 0
+          ? presence.active_ms_total
+          : 0
       const presenceActiveHours = activeMsToday / (60 * 60 * 1000)
+      const presenceActiveHoursTotal = activeMsTotal / (60 * 60 * 1000)
 
       const logLastSeenTime = onlineSignalTimes.length ? Math.max(...onlineSignalTimes) : null
       const presenceLastSeenTime = getPresenceHeartbeatTime(presence)
@@ -457,6 +463,7 @@ export default function WorkersPage() {
         uploadsToday,
         recentActions24h: times.filter((time) => time >= since24h).length,
         activeHoursToday: Math.round(Math.max(logActiveHoursToday, presenceActiveHours) * 10) / 10,
+        activeHoursTotal: Math.round(presenceActiveHoursTotal * 10) / 10,
         lastSeen: lastSeenTime ? new Date(lastSeenTime).toISOString() : null,
         isOnline: presenceOnline || logOnline,
         currentPage: presence?.current_page ?? null,
@@ -781,6 +788,10 @@ export default function WorkersPage() {
                     {
                       label: 'Active Today',
                       value: `${selectedWorker.activeHoursToday.toFixed(1)}h`,
+                    },
+                    {
+                      label: 'Active Total',
+                      value: `${selectedWorker.activeHoursTotal.toFixed(1)}h`,
                     },
                     {
                       label: 'Edits',

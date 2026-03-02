@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
-import { resolveWorkerIdentity, upsertWorkerPresence } from '@/lib/workerActivity'
+import {
+  getWorkerPresenceBaselineActiveMs,
+  resolveWorkerIdentity,
+  upsertWorkerPresence,
+} from '@/lib/workerActivity'
 import type { AdminRole } from '@/types'
 
 interface WorkerPresenceTrackerProps {
@@ -70,6 +74,7 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
 
     stoppedRef.current = false
     const interactionOptions: AddEventListenerOptions = { passive: true }
+    let timer: number | null = null
 
     const flushPresence = async () => {
       const currentWorker = workerRef.current
@@ -90,9 +95,10 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
       const delta = nowMs - sessionRef.current.lastFlushMs
       const recentlyActive = nowMs - sessionRef.current.lastInteractionMs <= ACTIVE_IDLE_MS
       const shouldCountActive = isVisible() && recentlyActive
+      const activeDeltaMs = shouldCountActive && delta > 0 && delta <= MAX_DELTA_MS ? delta : 0
 
-      if (shouldCountActive && delta > 0 && delta <= MAX_DELTA_MS) {
-        sessionRef.current.activeMsToday += delta
+      if (activeDeltaMs > 0) {
+        sessionRef.current.activeMsToday += activeDeltaMs
       }
 
       sessionRef.current.lastFlushMs = nowMs
@@ -102,6 +108,7 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
         currentPage: pathnameRef.current,
         isOnline: isVisible(),
         activeMsToday: sessionRef.current.activeMsToday,
+        activeDeltaMs,
         activeDate: sessionRef.current.activeDate,
         lastSeenIso: new Date(nowMs).toISOString(),
         heartbeatMs: nowMs,
@@ -122,11 +129,6 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
       }
       void flushPresence()
     }
-
-    markInteraction()
-    tick()
-
-    const timer = window.setInterval(tick, HEARTBEAT_MS)
 
     const handleVisibility = () => {
       if (isVisible()) {
@@ -156,6 +158,7 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
         currentPage: pathnameRef.current,
         isOnline: false,
         activeMsToday: sessionRef.current.activeMsToday,
+        activeDeltaMs: 0,
         activeDate: sessionRef.current.activeDate,
         lastSeenIso: new Date().toISOString(),
         heartbeatMs: Date.now(),
@@ -180,9 +183,30 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
     window.addEventListener('beforeunload', handleBeforeUnload)
     document.addEventListener('visibilitychange', handleVisibility)
 
+    const bootstrap = async () => {
+      const baseline = await getWorkerPresenceBaselineActiveMs(
+        worker.id,
+        sessionRef.current.activeDate,
+      )
+
+      if (stoppedRef.current) {
+        return
+      }
+
+      sessionRef.current.activeMsToday = Math.max(sessionRef.current.activeMsToday, baseline)
+      sessionRef.current.lastFlushMs = Date.now()
+      markInteraction()
+      tick()
+      timer = window.setInterval(tick, HEARTBEAT_MS)
+    }
+
+    void bootstrap()
+
     return () => {
       stoppedRef.current = true
-      window.clearInterval(timer)
+      if (timer !== null) {
+        window.clearInterval(timer)
+      }
       window.removeEventListener('mousemove', markInteraction)
       window.removeEventListener('keydown', markInteraction)
       window.removeEventListener('scroll', markInteraction)
@@ -206,6 +230,7 @@ export function WorkerPresenceTracker({ role }: WorkerPresenceTrackerProps) {
       currentPage: pathname,
       isOnline: document.visibilityState !== 'hidden',
       activeMsToday: sessionRef.current.activeMsToday,
+      activeDeltaMs: 0,
       activeDate: sessionRef.current.activeDate,
       lastSeenIso: new Date(nowMs).toISOString(),
       heartbeatMs: nowMs,

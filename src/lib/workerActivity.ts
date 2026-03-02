@@ -1,4 +1,12 @@
-import { addDoc, collection, doc, serverTimestamp, setDoc } from 'firebase/firestore'
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  increment,
+  serverTimestamp,
+  setDoc,
+} from 'firebase/firestore'
 import { db, ensureFirebaseClientAuth } from '@/lib/firebase'
 import type { AdminRole, ChangeLog } from '@/types'
 
@@ -30,6 +38,7 @@ interface WorkerPresenceInput {
   currentPage: string
   isOnline: boolean
   activeMsToday: number
+  activeDeltaMs?: number
   activeDate: string
   lastSeenIso?: string
   heartbeatMs?: number
@@ -109,17 +118,44 @@ export function isPresenceHeartbeatLog(
   )
 }
 
+export async function getWorkerPresenceBaselineActiveMs(
+  workerId: string,
+  activeDate: string,
+): Promise<number> {
+  try {
+    await ensureFirebaseClientAuth()
+    const snapshot = await getDoc(doc(db, 'worker_presence', workerId))
+
+    if (!snapshot.exists()) {
+      return 0
+    }
+
+    const data = snapshot.data() as { active_date?: unknown; active_ms_today?: unknown }
+    const sameDate = data.active_date === activeDate
+    const activeMs =
+      typeof data.active_ms_today === 'number' && Number.isFinite(data.active_ms_today)
+        ? Math.max(0, Math.round(data.active_ms_today))
+        : 0
+
+    return sameDate ? activeMs : 0
+  } catch {
+    return 0
+  }
+}
+
 export async function upsertWorkerPresence({
   worker,
   currentPage,
   isOnline,
   activeMsToday,
+  activeDeltaMs,
   activeDate,
   lastSeenIso,
   heartbeatMs,
 }: WorkerPresenceInput): Promise<boolean> {
   try {
     const nowMs = heartbeatMs ?? Date.now()
+    const deltaMs = Math.max(0, Math.round(activeDeltaMs ?? 0))
     await ensureFirebaseClientAuth()
     await setDoc(
       doc(db, 'worker_presence', worker.id),
@@ -131,6 +167,7 @@ export async function upsertWorkerPresence({
         current_page: currentPage,
         is_online: isOnline,
         active_ms_today: Math.max(0, Math.round(activeMsToday)),
+        active_ms_total: increment(deltaMs),
         active_date: activeDate,
         last_seen: lastSeenIso ?? new Date(nowMs).toISOString(),
         last_seen_epoch_ms: nowMs,
