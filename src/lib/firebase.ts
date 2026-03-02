@@ -3,8 +3,7 @@ import { getAuth, signInAnonymously } from 'firebase/auth'
 import { getDatabase } from 'firebase/database'
 import { getFirestore } from 'firebase/firestore'
 
-function envValue(key: string): string | undefined {
-  const value = process.env[key]
+function envValue(value: string | undefined): string | undefined {
   if (!value) {
     return undefined
   }
@@ -13,16 +12,19 @@ function envValue(key: string): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined
 }
 
-const projectId = envValue('NEXT_PUBLIC_FIREBASE_PROJECT_ID') ?? 'demo-project'
-
 const rawFirebaseEnv = {
-  NEXT_PUBLIC_FIREBASE_API_KEY: envValue('NEXT_PUBLIC_FIREBASE_API_KEY'),
-  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: envValue('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN'),
-  NEXT_PUBLIC_FIREBASE_PROJECT_ID: envValue('NEXT_PUBLIC_FIREBASE_PROJECT_ID'),
-  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: envValue('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET'),
-  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: envValue('NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID'),
-  NEXT_PUBLIC_FIREBASE_APP_ID: envValue('NEXT_PUBLIC_FIREBASE_APP_ID'),
+  NEXT_PUBLIC_FIREBASE_API_KEY: envValue(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: envValue(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID: envValue(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
+  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: envValue(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
+  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: envValue(
+    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  ),
+  NEXT_PUBLIC_FIREBASE_APP_ID: envValue(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
+  NEXT_PUBLIC_FIREBASE_DATABASE_URL: envValue(process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL),
 }
+
+const projectId = rawFirebaseEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? 'demo-project'
 
 const missingFirebaseEnv = Object.entries(rawFirebaseEnv)
   .filter(([, value]) => !value)
@@ -36,16 +38,26 @@ const firebaseConfig = {
   messagingSenderId: rawFirebaseEnv.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: rawFirebaseEnv.NEXT_PUBLIC_FIREBASE_APP_ID,
   databaseURL:
-    envValue('NEXT_PUBLIC_FIREBASE_DATABASE_URL') ?? `https://${projectId}-default-rtdb.firebaseio.com`,
+    rawFirebaseEnv.NEXT_PUBLIC_FIREBASE_DATABASE_URL ??
+    `https://${projectId}-default-rtdb.firebaseio.com`,
 }
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
 
 export const db = getFirestore(app)
 export const rtdb = getDatabase(app)
-export const auth = getAuth(app)
+
+let authInstance: ReturnType<typeof getAuth> | null = null
 
 let authPromise: Promise<void> | null = null
+
+function getFirebaseAuth() {
+  if (!authInstance) {
+    authInstance = getAuth(app)
+  }
+
+  return authInstance
+}
 
 function assertFirebaseConfig() {
   if (missingFirebaseEnv.length > 0) {
@@ -61,6 +73,8 @@ export async function ensureFirebaseClientAuth() {
   }
 
   assertFirebaseConfig()
+
+  const auth = getFirebaseAuth()
 
   if (auth.currentUser) {
     return
