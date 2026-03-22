@@ -23,8 +23,6 @@ export function resolveWorkerIdentity(input: WorkerIdentityInput): WorkerIdentit
   }
 }
 
-// Stub — accepts any shape, does nothing
+// Stub — worker activity tracking disabled (no-op)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function recordWorkerAction(_input: Record<string, any>): Promise<void> {
-  // no-op
-}
+export async function recordWorkerAction(_input: Record<string, any>): Promise<void> {}

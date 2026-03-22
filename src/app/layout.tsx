@@ -50,3 +50,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </ClerkProvider>
   )
 }
+
+// Force dynamic rendering - Clerk requires runtime context
+export const dynamic = 'force-dynamic'
