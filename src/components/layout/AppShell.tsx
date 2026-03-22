@@ -5,16 +5,11 @@ import { usePathname } from 'next/navigation'
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { TopNavbar } from '@/components/layout/TopNavbar'
-import { WorkerPresenceTracker } from '@/components/layout/WorkerPresenceTracker'
 import { useAdminRole } from '@/lib/useAdminRole'
 
-interface AppShellProps {
-  children: ReactNode
-}
+const SIDEBAR_KEY = 'pdflovers.sidebar.compact'
 
-const SIDEBAR_PREF_KEY = 'pdflovers.sidebar.compact'
-
-function isPublicRoute(pathname: string): boolean {
+function isPublicRoute(pathname: string) {
   return (
     pathname.startsWith('/login') ||
     pathname.startsWith('/sign-in') ||
@@ -23,54 +18,38 @@ function isPublicRoute(pathname: string): boolean {
   )
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const role = useAdminRole()
-  const [compactSidebar, setCompactSidebar] = useState(false)
-  const isChatRoute = pathname.startsWith('/chat')
+  const [compact, setCompact] = useState(false)
 
   useEffect(() => {
-    const saved = localStorage.getItem(SIDEBAR_PREF_KEY)
-    setCompactSidebar(saved === '1')
+    const saved = localStorage.getItem(SIDEBAR_KEY)
+    setCompact(saved === '1')
   }, [])
 
-  useEffect(() => {
-    if (compactSidebar) {
-      document.body.classList.add('sidebar-compact')
-    } else {
-      document.body.classList.remove('sidebar-compact')
-    }
-  }, [compactSidebar])
-
-  function handleToggleCompactSidebar() {
-    setCompactSidebar((prev) => {
+  function toggleCompact() {
+    setCompact((prev) => {
       const next = !prev
-      localStorage.setItem(SIDEBAR_PREF_KEY, next ? '1' : '0')
+      localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0')
       return next
     })
   }
 
-  if (isPublicRoute(pathname)) {
-    return <>{children}</>
-  }
+  if (isPublicRoute(pathname)) return <>{children}</>
+
+  const ml = compact ? 'md:ml-[68px]' : 'md:ml-[210px]'
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-bg-primary">
-      <Sidebar compact={compactSidebar} onToggleCompact={handleToggleCompactSidebar} role={role} />
-      <div className={compactSidebar ? 'md:ml-[76px]' : 'md:ml-[220px]'}>
-        <TopNavbar compactSidebar={compactSidebar} role={role} />
-        <WorkerPresenceTracker role={role} />
-        <main
-          className={
-            isChatRoute
-              ? 'mt-16 h-[calc(100dvh-4rem)] overflow-hidden p-0'
-              : 'min-h-[calc(100vh-4rem)] px-3 pb-20 pt-[4.75rem] md:px-6 md:pb-6'
-          }
-        >
+    <div className="min-h-screen" style={{ background: '#080808' }}>
+      <Sidebar compact={compact} onToggleCompact={toggleCompact} role={role} />
+      <div className={`${ml} transition-all duration-300`}>
+        <TopNavbar compactSidebar={compact} role={role} />
+        <main className="min-h-screen px-3 pb-20 pt-[70px] md:px-5 md:pb-6">
           {children}
         </main>
       </div>
-      {!isChatRoute ? <MobileBottomNav role={role} /> : null}
+      <MobileBottomNav role={role} />
     </div>
   )
 }

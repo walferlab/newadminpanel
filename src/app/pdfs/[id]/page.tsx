@@ -173,7 +173,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
   if (loading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
-        <div className="flex items-center gap-3 text-sm text-text-muted">
+        <div className="flex items-center gap-3 text-sm text-gray-500">
           <div className="spinner" />
           Loading PDF editor...
         </div>
@@ -191,7 +191,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
       <form onSubmit={onSubmit} className="space-y-6">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="lg:col-span-2">
-            <label className="mb-1.5 block text-xs text-text-muted">Title</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Title</label>
             <input
               className="admin-input"
               value={form.title}
@@ -201,7 +201,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-text-muted">Author</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Author</label>
             <input
               className="admin-input"
               value={form.author}
@@ -211,7 +211,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-text-muted">Category</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Category</label>
             <input
               className="admin-input"
               value={form.category}
@@ -221,7 +221,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div className="lg:col-span-2">
-            <label className="mb-1.5 block text-xs text-text-muted">Tags (comma-separated)</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Tags (comma-separated)</label>
             <input
               className="admin-input"
               value={form.tags}
@@ -231,7 +231,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-text-muted">Cover Image URL</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Cover Image URL</label>
             <input
               className="admin-input"
               value={form.cover_image_url}
@@ -241,7 +241,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-text-muted">Download URL</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Download URL</label>
             <input
               className="admin-input"
               value={form.download_url}
@@ -251,7 +251,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-text-muted">Smart Link</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Smart Link</label>
             <input
               className="admin-input"
               value={form.smart_link}
@@ -261,7 +261,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-text-muted">Page Count</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Page Count</label>
             <input
               type="number"
               className="admin-input"
@@ -272,7 +272,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-text-muted">Rating</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Rating</label>
             <input
               type="number"
               step="0.1"
@@ -286,7 +286,7 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs text-text-muted">Published Date</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Published Date</label>
             <input
               type="date"
               className="admin-input"
@@ -302,13 +302,13 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
               checked={form.is_featured}
               onChange={(e) => setForm((p) => ({ ...p, is_featured: e.target.checked }))}
             />
-            <label htmlFor="featured" className="text-sm text-text-secondary">
+            <label htmlFor="featured" className="text-sm text-gray-300">
               Mark as featured
             </label>
           </div>
 
           <div className="lg:col-span-2">
-            <label className="mb-1.5 block text-xs text-text-muted">Summary</label>
+            <label className="mb-1.5 block text-xs text-gray-500">Summary</label>
             <textarea
               className="admin-input h-28 resize-none"
               value={form.summary}
@@ -318,12 +318,12 @@ export default function PdfEditorPage({ params }: PdfEditorPageProps) {
           </div>
         </div>
 
-        <div className="border border-border-subtle bg-bg-secondary p-4">
+        <div className="border border-white/6 rgba(14,14,14,0.95) p-4">
           <div className="mb-2 flex items-center justify-between text-sm">
-            <span className="text-text-muted">Metadata quality</span>
-            <span className="font-medium text-text-primary">{quality}%</span>
+            <span className="text-gray-500">Metadata quality</span>
+            <span className="font-medium text-white">{quality}%</span>
           </div>
-          <div className="h-1.5 bg-bg-elevated">
+          <div className="h-1.5 rgba(255,255,255,0.04)">
             <div className="h-full bg-accent-amber" style={{ width: `${quality}%` }} />
           </div>
         </div>

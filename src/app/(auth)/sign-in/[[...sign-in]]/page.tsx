@@ -1,20 +1,20 @@
-﻿import { SignIn } from '@clerk/nextjs'
+import { SignIn } from '@clerk/nextjs'
 import { AuthFrame } from '@/components/auth/AuthFrame'
 
 export default function SignInPage() {
   return (
-    <AuthFrame title="PDF Lovers" subtitle="Admin sign in">
+    <AuthFrame title="PDF Lovers Admin" subtitle="Sign in to continue">
       <SignIn
         path="/sign-in"
         routing="path"
         appearance={{
           variables: {
-            colorPrimary: '#d9763b',
-            colorBackground: '#151922',
-            colorInputBackground: '#1a1f2a',
-            colorInputText: '#f2f4f8',
-            colorText: '#f2f4f8',
-            borderRadius: '6px',
+            colorPrimary: '#ffffff',
+            colorBackground: '#0e0e0e',
+            colorInputBackground: 'rgba(255,255,255,0.05)',
+            colorInputText: '#ffffff',
+            colorText: '#cccccc',
+            borderRadius: '10px',
           },
         }}
       />

@@ -3,39 +3,36 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { getNavItemsForRole } from '@/config/navigation'
-import { cn } from '@/lib/utils'
 import type { AdminRole } from '@/types'
 
-interface MobileBottomNavProps {
-  role: AdminRole | null
-}
-
-export function MobileBottomNav({ role }: MobileBottomNavProps) {
+export function MobileBottomNav({ role }: { role: AdminRole | null }) {
   const pathname = usePathname()
-  const navItems = getNavItemsForRole(role)
+  const navItems = getNavItemsForRole(role).slice(0, 5) // max 5 on mobile
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border-subtle bg-bg-primary/98 backdrop-blur-sm md:hidden">
-      <div className="flex h-16 items-center gap-1 overflow-x-auto px-2">
-        {navItems.map((item) => {
-          const Icon = item.icon
-          const active = pathname.startsWith(item.href)
-
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'inline-flex h-11 min-w-[84px] flex-col items-center justify-center gap-1 rounded-md px-2 text-[11px] transition-colors',
-                active ? 'bg-bg-elevated/70 text-text-primary' : 'text-text-muted',
-              )}
-            >
-              <Icon size={16} />
-              <span>{item.label}</span>
-            </Link>
-          )
-        })}
-      </div>
+    <nav
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around h-14"
+      style={{
+        background: 'rgba(8,8,8,0.97)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderTop: '1px solid rgba(255,255,255,0.06)',
+      }}
+    >
+      {navItems.map(({ icon: Icon, label, href }) => {
+        const active = pathname.startsWith(href)
+        return (
+          <Link
+            key={href}
+            href={href}
+            className="flex flex-col items-center gap-0.5 px-4 py-1 transition-all"
+            style={{ color: active ? '#fff' : '#444' }}
+          >
+            <Icon size={19} strokeWidth={active ? 2.2 : 1.8} />
+            <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.01em' }}>{label}</span>
+          </Link>
+        )
+      })}
     </nav>
   )
 }

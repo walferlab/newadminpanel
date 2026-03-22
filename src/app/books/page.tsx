@@ -172,7 +172,7 @@ function BooksPageContent() {
       sortable: true,
       render: (book) => (
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-9 flex-shrink-0 items-center justify-center border border-border-subtle bg-[#21262f]">
+          <div className="flex h-11 w-9 flex-shrink-0 items-center justify-center border border-white/6 bg-[#21262f]">
             {book.cover_image_url ? (
               <Image
                 src={book.cover_image_url}
@@ -182,14 +182,14 @@ function BooksPageContent() {
                 className="h-full w-full object-cover"
               />
             ) : (
-              <BookOpen size={12} className="text-accent-purple" />
+              <BookOpen size={12} className="text-violet-400" />
             )}
           </div>
           <div>
-            <p className="max-w-[240px] truncate text-sm font-medium text-text-primary">
+            <p className="max-w-[240px] truncate text-sm font-medium text-white">
               {book.title}
             </p>
-            <p className="text-xs text-text-muted">{book.author ?? '-'}</p>
+            <p className="text-xs text-gray-500">{book.author ?? '-'}</p>
           </div>
         </div>
       ),
@@ -198,7 +198,7 @@ function BooksPageContent() {
       key: 'category',
       header: 'Category',
       render: (book) => (
-        <span className="badge border-border-default bg-bg-elevated text-text-secondary">
+        <span className="badge border-white/10 rgba(255,255,255,0.04) text-gray-300">
           {book.category ?? '-'}
         </span>
       ),
@@ -209,7 +209,7 @@ function BooksPageContent() {
       sortable: true,
       render: (book) => (
         <div className="flex items-center gap-1.5 text-sm">
-          <Download size={12} className="text-text-muted" />
+          <Download size={12} className="text-gray-500" />
           {formatNumber(book.download_count)}
         </div>
       ),
@@ -222,7 +222,7 @@ function BooksPageContent() {
 
         return (
           <div className="flex items-center gap-2">
-            <div className="h-1.5 w-16 bg-bg-elevated">
+            <div className="h-1.5 w-16 rgba(255,255,255,0.04)">
               <div
                 className={cn(
                   'h-full',
@@ -235,7 +235,7 @@ function BooksPageContent() {
                 style={{ width: `${score}%` }}
               />
             </div>
-            <span className="w-8 text-xs text-text-muted">{score}%</span>
+            <span className="w-8 text-xs text-gray-500">{score}%</span>
           </div>
         )
       },
@@ -248,7 +248,7 @@ function BooksPageContent() {
           <Star
             size={15}
             className={
-              book.is_featured ? 'fill-accent-amber text-accent-amber' : 'text-text-muted'
+              book.is_featured ? 'fill-accent-amber text-amber-400' : 'text-gray-500'
             }
           />
         </button>
@@ -259,7 +259,7 @@ function BooksPageContent() {
       header: 'Added',
       sortable: true,
       render: (book) => (
-        <span className="text-xs text-text-muted">{formatDate(book.created_at, 'relative')}</span>
+        <span className="text-xs text-gray-500">{formatDate(book.created_at, 'relative')}</span>
       ),
     },
     {
@@ -269,7 +269,7 @@ function BooksPageContent() {
         <div className="flex items-center gap-1">
           <Link
             href={`/pdfs/${book.id}`}
-            className="inline-flex h-8 w-8 items-center justify-center border border-border-subtle text-text-muted transition-colors hover:text-text-primary"
+            className="inline-flex h-8 w-8 items-center justify-center border border-white/6 text-gray-500 transition-colors hover:text-white"
             aria-label="Edit"
           >
             <Edit2 size={13} />
@@ -277,9 +277,9 @@ function BooksPageContent() {
           <button
             onClick={() => requestDelete(book)}
             className={cn(
-              'inline-flex h-8 w-8 items-center justify-center border border-border-subtle text-text-muted transition-colors hover:border-accent-red/50 hover:text-accent-red',
+              'inline-flex h-8 w-8 items-center justify-center border border-white/6 text-gray-500 transition-colors hover:border-accent-red/50 hover:text-red-400',
               !canDeleteBooks &&
-                'cursor-not-allowed opacity-50 hover:border-border-subtle hover:text-text-muted',
+                'cursor-not-allowed opacity-50 hover:border-white/6 hover:text-gray-500',
             )}
             type="button"
             aria-label="Delete"
@@ -301,7 +301,7 @@ function BooksPageContent() {
           <div className="relative w-full max-w-sm flex-1">
             <Search
               size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
             />
             <input
               className="admin-input pl-9"
@@ -334,15 +334,15 @@ function BooksPageContent() {
       >
         <div className="space-y-4">
           <div className="flex items-start gap-3 rounded-xl border border-accent-red/30 bg-accent-red/10 p-3">
-            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 text-accent-red" />
-            <p className="text-sm text-text-secondary">
+            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 text-red-400" />
+            <p className="text-sm text-gray-300">
               Permanently delete{' '}
-              <span className="font-semibold text-text-primary">{bookPendingDelete?.title}</span>?
+              <span className="font-semibold text-white">{bookPendingDelete?.title}</span>?
               Linked download events will also be removed.
             </p>
           </div>
 
-          <p className="text-xs text-text-muted">This action cannot be undone.</p>
+          <p className="text-xs text-gray-500">This action cannot be undone.</p>
 
           <div className="flex justify-end gap-2">
             <button
