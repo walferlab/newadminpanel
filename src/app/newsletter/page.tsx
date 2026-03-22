@@ -1,12 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, CheckCircle, Loader2, Mail, Send, Sparkles, Trash2, Users } from 'lucide-react'
+import { Bell, Loader2, Mail, RefreshCw, Send, Trash2, Users } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Header } from '@/components/layout/Header'
-import { supabase } from '@/lib/supabase'
 import { useAdminRole } from '@/lib/useAdminRole'
-import { ROLE_PERMISSIONS } from '@/types'
 
 interface Subscriber {
   id: number
@@ -75,27 +73,36 @@ const GENRE_OPTIONS = [
 
 export default function NewsletterPage() {
   const role = useAdminRole()
-  const canSend = role ? (role === 'super_admin' || role === 'admin') : false
+  const canSend = role === 'super_admin' || role === 'admin'
 
-  const [subscribers, setSubscribers]     = useState<Subscriber[]>([])
-  const [logs, setLogs]                   = useState<SendLog[]>([])
-  const [loading, setLoading]             = useState(true)
-  const [tab, setTab]                     = useState<'compose' | 'subscribers' | 'history'>('subscribers')
-  const [subject, setSubject]             = useState('')
-  const [html, setHtml]                   = useState(TEMPLATES[0].html)
-  const [genre, setGenre]                 = useState('all')
-  const [sending, setSending]             = useState(false)
-  const [showPreview, setShowPreview]     = useState(false)
+  const [subscribers, setSubscribers]   = useState<Subscriber[]>([])
+  const [logs, setLogs]                 = useState<SendLog[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [tab, setTab]                   = useState<'subscribers' | 'compose' | 'history'>('subscribers')
+  const [subject, setSubject]           = useState('')
+  const [html, setHtml]                 = useState(TEMPLATES[0].html)
+  const [genre, setGenre]               = useState('all')
+  const [sending, setSending]           = useState(false)
+  const [showPreview, setShowPreview]   = useState(false)
 
+  // Fetch using the API route (service role — bypasses RLS)
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const [subsRes, logsRes] = await Promise.all([
-      supabase.from('newsletter_subscribers').select('*').order('subscribed_at', { ascending: false }),
-      supabase.from('newsletter_send_logs').select('*').order('created_at', { ascending: false }).limit(20),
-    ])
-    setSubscribers((subsRes.data ?? []) as Subscriber[])
-    setLogs((logsRes.data ?? []) as SendLog[])
-    setLoading(false)
+    try {
+      const res = await fetch('/api/newsletter/subscribers', { cache: 'no-store' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Failed to load newsletter data')
+        return
+      }
+      const data = await res.json()
+      setSubscribers(data.subscribers ?? [])
+      setLogs(data.logs ?? [])
+    } catch {
+      toast.error('Network error loading newsletter data')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { void fetchData() }, [fetchData])
@@ -104,24 +111,17 @@ export default function NewsletterPage() {
 
   async function handleSend() {
     if (!subject.trim() || !html.trim()) return toast.error('Subject and content are required')
+    if (!canSend) return toast.error('Only admins can send newsletters')
     setSending(true)
     try {
-      const { data: logEntry, error: logErr } = await supabase
-        .from('newsletter_send_logs')
-        .insert({ subject: subject.trim(), body_html: html, genre_filter: genre, status: 'pending', sent_by: 'admin' })
-        .select('id').single()
-
-      if (logErr || !logEntry) throw new Error('Failed to create log')
-
-      const edgeUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-newsletter`
-      const res = await fetch(edgeUrl, {
+      const res = await fetch('/api/newsletter/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-secret': process.env.NEXT_PUBLIC_NEWSLETTER_SECRET ?? '' },
-        body: JSON.stringify({ subject: subject.trim(), html, genre_filter: genre, log_id: logEntry.id }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, html, genre_filter: genre }),
       })
-      const result = await res.json()
-      if (!res.ok) throw new Error(result.error ?? 'Send failed')
-      toast.success(`Sent to ${result.sent} subscribers!`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Send failed')
+      toast.success(`Sent to ${data.sent ?? 0} subscribers! ✅`)
       void fetchData()
       setTab('history')
     } catch (err) {
@@ -131,43 +131,59 @@ export default function NewsletterPage() {
     }
   }
 
-  async function toggleSubscriberStatus(id: number, currentStatus: boolean) {
-    const { error } = await supabase
-      .from('newsletter_subscribers')
-      .update({ is_active: !currentStatus })
-      .eq('id', id)
-    if (error) return toast.error('Failed to update')
-    setSubscribers((prev) => prev.map((s) => s.id === id ? { ...s, is_active: !currentStatus } : s))
+  async function toggleSubscriber(id: number, isActive: boolean) {
+    const res = await fetch('/api/newsletter/subscribers', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, is_active: !isActive }),
+    })
+    if (!res.ok) return toast.error('Failed to update')
+    setSubscribers((prev) => prev.map((s) => s.id === id ? { ...s, is_active: !isActive } : s))
     toast.success('Updated')
   }
 
-  async function deleteSubscriber(id: number) {
-    if (!confirm('Delete this subscriber permanently?')) return
-    const { error } = await supabase.from('newsletter_subscribers').delete().eq('id', id)
-    if (error) return toast.error('Failed to delete')
+  async function deleteSubscriber(id: number, email: string) {
+    if (!confirm(`Delete subscriber ${email}?`)) return
+    const res = await fetch('/api/newsletter/subscribers', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action: 'delete' }),
+    })
+    if (!res.ok) return toast.error('Failed to delete')
     setSubscribers((prev) => prev.filter((s) => s.id !== id))
     toast.success('Deleted')
   }
 
   const card = { background: 'rgba(14,14,14,0.95)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14 }
-  const inputStyle = { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, color: '#fff', width: '100%', padding: '8px 12px', fontSize: 13, outline: 'none' }
+  const inputStyle = {
+    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 10, color: '#fff', width: '100%', padding: '8px 12px', fontSize: 13, outline: 'none',
+  } as React.CSSProperties
 
   return (
     <div className="animate-fade-in">
-      <Header title="Newsletter" subtitle={`${activeCount} active subscribers`} />
+      <Header
+        title="Newsletter"
+        subtitle={`${activeCount} active subscribers`}
+        actions={
+          <button onClick={() => fetchData()} className="btn-secondary" title="Refresh">
+            <RefreshCw size={13} />
+          </button>
+        }
+      />
       <div className="space-y-4 p-4 md:p-5">
 
-        {/* Stats row */}
+        {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'Total', value: subscribers.length, icon: Users },
-            { label: 'Active', value: activeCount, icon: Bell },
+            { label: 'Total',      value: subscribers.length,                                    icon: Users },
+            { label: 'Active',     value: activeCount,                                           icon: Bell },
             { label: 'Emails Sent', value: logs.reduce((a, l) => a + (l.sent_to_count ?? 0), 0), icon: Send },
           ].map(({ label, value, icon: Icon }) => (
             <div key={label} style={card} className="p-4 flex flex-col gap-1">
               <div className="flex items-center gap-2">
-                <Icon size={14} style={{ color: '#555' }} />
-                <span style={{ fontSize: 11, color: '#555', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
+                <Icon size={13} style={{ color: '#444' }} />
+                <span style={{ fontSize: 11, color: '#444', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>{label}</span>
               </div>
               <span style={{ fontSize: 22, fontWeight: 700, color: '#fff', letterSpacing: '-0.03em' }}>{value}</span>
             </div>
@@ -196,52 +212,57 @@ export default function NewsletterPage() {
         {tab === 'subscribers' && (
           <div style={card} className="overflow-hidden">
             {loading ? (
-              <div className="flex items-center justify-center py-16">
-                <div className="spinner" />
-              </div>
+              <div className="flex justify-center py-16"><div className="spinner" /></div>
             ) : subscribers.length === 0 ? (
               <p className="py-12 text-center" style={{ color: '#444', fontSize: 14 }}>No subscribers yet.</p>
             ) : (
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Email</th>
-                    <th>Name</th>
-                    <th>Genre</th>
-                    <th>Source</th>
-                    <th>Status</th>
-                    <th>Joined</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {subscribers.map((s) => (
-                    <tr key={s.id}>
-                      <td style={{ color: '#fff', fontSize: 13 }}>{s.email}</td>
-                      <td>{s.name ?? '—'}</td>
-                      <td><span className="badge badge-gray">{s.genre_preference}</span></td>
-                      <td style={{ fontSize: 12 }}>{s.source}</td>
-                      <td>
-                        <span className={s.is_active ? 'badge badge-green' : 'badge badge-gray'}>
-                          {s.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td style={{ fontSize: 12 }}>{new Date(s.subscribed_at).toLocaleDateString('en-IN')}</td>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => toggleSubscriberStatus(s.id, s.is_active)}
-                            className="text-xs transition-opacity hover:opacity-60" style={{ color: '#666' }}>
-                            {s.is_active ? 'Deactivate' : 'Activate'}
-                          </button>
-                          <button onClick={() => deleteSubscriber(s.id)} title="Delete">
-                            <Trash2 size={13} style={{ color: '#555' }} className="hover:text-red-400 transition-colors" />
-                          </button>
-                        </div>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Name</th>
+                      <th>Genre</th>
+                      <th>Source</th>
+                      <th>Status</th>
+                      <th>Joined</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {subscribers.map((s) => (
+                      <tr key={s.id}>
+                        <td style={{ color: '#fff', fontSize: 13 }}>{s.email}</td>
+                        <td style={{ fontSize: 12 }}>{s.name ?? '—'}</td>
+                        <td><span className="badge badge-gray">{s.genre_preference}</span></td>
+                        <td style={{ fontSize: 12 }}>{s.source}</td>
+                        <td>
+                          <span className={s.is_active ? 'badge badge-green' : 'badge badge-gray'}>
+                            {s.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 12 }}>
+                          {new Date(s.subscribed_at).toLocaleDateString('en-IN')}
+                        </td>
+                        <td>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => toggleSubscriber(s.id, s.is_active)}
+                              className="text-xs transition-opacity hover:opacity-60"
+                              style={{ color: '#666' }}
+                            >
+                              {s.is_active ? 'Deactivate' : 'Activate'}
+                            </button>
+                            <button onClick={() => deleteSubscriber(s.id, s.email)}>
+                              <Trash2 size={13} style={{ color: '#444' }} className="hover:text-red-400 transition-colors" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
@@ -250,8 +271,11 @@ export default function NewsletterPage() {
         {tab === 'compose' && (
           <div style={card} className="p-5 space-y-4">
             {!canSend && (
-              <div className="badge badge-amber p-3 w-full justify-center">
-                Only admins can send newsletters
+              <div
+                className="flex items-center gap-2 p-3 rounded-xl text-sm"
+                style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#fbbf24' }}
+              >
+                Only super_admin and admin roles can send newsletters.
               </div>
             )}
 
@@ -262,7 +286,7 @@ export default function NewsletterPage() {
                   key={t.label}
                   onClick={() => { setSubject(t.subject); setHtml(t.html) }}
                   className="text-xs px-3 py-1.5 rounded-lg transition-all hover:opacity-80"
-                  style={{ background: 'rgba(255,255,255,0.06)', color: '#aaa', border: '1px solid rgba(255,255,255,0.07)' }}
+                  style={{ background: 'rgba(255,255,255,0.05)', color: '#888', border: '1px solid rgba(255,255,255,0.07)' }}
                 >
                   {t.label}
                 </button>
@@ -284,7 +308,7 @@ export default function NewsletterPage() {
             <div className="space-y-1.5">
               <label style={{ fontSize: 12, color: '#555' }}>Send to</label>
               <select
-                style={{ ...inputStyle, appearance: 'none' }}
+                style={{ ...inputStyle, appearance: 'none' } as React.CSSProperties}
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
               >
@@ -297,18 +321,24 @@ export default function NewsletterPage() {
             {/* HTML body */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label style={{ fontSize: 12, color: '#555' }}>Email body (HTML)</label>
-                <button onClick={() => setShowPreview(!showPreview)} style={{ fontSize: 12, color: '#555' }} className="hover:text-white transition-colors">
-                  {showPreview ? 'Edit' : 'Preview'}
+                <label style={{ fontSize: 12, color: '#555' }}>Email body (HTML) *</label>
+                <button
+                  onClick={() => setShowPreview(!showPreview)}
+                  style={{ fontSize: 12, color: '#555' }}
+                  className="hover:text-white transition-colors"
+                >
+                  {showPreview ? '← Edit' : '👁 Preview'}
                 </button>
               </div>
               {showPreview ? (
-                <div style={{ background: '#111', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: 24, minHeight: 300 }}
-                  dangerouslySetInnerHTML={{ __html: html }} />
+                <div
+                  style={{ background: '#111', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: 24, minHeight: 280 }}
+                  dangerouslySetInnerHTML={{ __html: html }}
+                />
               ) : (
                 <textarea
-                  rows={12}
-                  style={{ ...inputStyle, padding: '10px 12px', resize: 'vertical', fontFamily: 'monospace', lineHeight: 1.6 }}
+                  rows={14}
+                  style={{ ...inputStyle, padding: '10px 12px', resize: 'vertical', fontFamily: 'monospace', lineHeight: 1.6, minHeight: 200 } as React.CSSProperties}
                   value={html}
                   onChange={(e) => setHtml(e.target.value)}
                   placeholder="Write HTML email content..."
@@ -316,13 +346,21 @@ export default function NewsletterPage() {
               )}
             </div>
 
+            {/* Active subscriber count */}
+            <p style={{ fontSize: 12, color: '#444' }}>
+              Will send to <strong style={{ color: '#888' }}>{activeCount}</strong> active subscriber{activeCount !== 1 ? 's' : ''}
+            </p>
+
             {/* Send button */}
             <button
               onClick={handleSend}
               disabled={sending || !canSend || !subject.trim() || !html.trim()}
               className="btn-primary w-full h-11 text-[13px]"
             >
-              {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : <><Send size={14} /> Send Newsletter</>}
+              {sending
+                ? <><Loader2 size={14} className="animate-spin" /> Sending…</>
+                : <><Send size={14} /> Send Newsletter to {activeCount} subscribers</>
+              }
             </button>
           </div>
         )}
@@ -333,34 +371,45 @@ export default function NewsletterPage() {
             {logs.length === 0 ? (
               <p className="py-12 text-center" style={{ color: '#444', fontSize: 14 }}>No emails sent yet.</p>
             ) : (
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Subject</th>
-                    <th>Audience</th>
-                    <th>Sent</th>
-                    <th>Failed</th>
-                    <th>Status</th>
-                    <th>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.map((l) => (
-                    <tr key={l.id}>
-                      <td style={{ color: '#fff', maxWidth: 200 }} className="truncate">{l.subject}</td>
-                      <td><span className="badge badge-gray">{l.genre_filter}</span></td>
-                      <td style={{ color: '#4ade80' }}>{l.sent_to_count}</td>
-                      <td style={{ color: l.failed_count > 0 ? '#f87171' : '#555' }}>{l.failed_count}</td>
-                      <td>
-                        <span className={l.status === 'done' ? 'badge badge-green' : l.status === 'failed' ? 'badge badge-red' : 'badge badge-amber'}>
-                          {l.status}
-                        </span>
-                      </td>
-                      <td style={{ fontSize: 12 }}>{new Date(l.created_at).toLocaleDateString('en-IN')}</td>
+              <div className="overflow-x-auto">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Subject</th>
+                      <th>Audience</th>
+                      <th>Sent</th>
+                      <th>Failed</th>
+                      <th>Status</th>
+                      <th>Date</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {logs.map((l) => (
+                      <tr key={l.id}>
+                        <td style={{ color: '#fff', maxWidth: 240 }}>
+                          <p className="truncate">{l.subject}</p>
+                        </td>
+                        <td><span className="badge badge-gray">{l.genre_filter}</span></td>
+                        <td style={{ color: '#4ade80', fontWeight: 600 }}>{l.sent_to_count}</td>
+                        <td style={{ color: l.failed_count > 0 ? '#f87171' : '#555' }}>{l.failed_count}</td>
+                        <td>
+                          <span className={
+                            l.status === 'done'    ? 'badge badge-green' :
+                            l.status === 'failed'  ? 'badge badge-red' :
+                            l.status === 'sending' ? 'badge badge-blue' :
+                            'badge badge-amber'
+                          }>
+                            {l.status}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 12 }}>
+                          {new Date(l.created_at).toLocaleDateString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
